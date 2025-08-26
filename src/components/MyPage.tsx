@@ -22,6 +22,10 @@ interface UserProfile {
     transportation: number;
     accommodation: number;
   };
+  allowanceFlags: {
+    useTransportation: boolean;
+    useAccommodation: boolean;
+  };
 }
 
 interface NotificationSettings {
@@ -53,6 +57,10 @@ function MyPage({ onNavigate }: MyPageProps) {
       overseas: 10000,
       transportation: 2000,
       accommodation: 10000
+    },
+    allowanceFlags: {
+      useTransportation: true,
+      useAccommodation: true
     }
   });
 
@@ -86,8 +94,42 @@ function MyPage({ onNavigate }: MyPageProps) {
           accommodation: 10000
         }
       });
+
+      // 既存の日当設定を読み込み
+      loadAllowanceSettings();
     }
   }, [userData.profile]);
+
+  // 日当設定を読み込む関数
+  const loadAllowanceSettings = async () => {
+    if (!userData.profile) return;
+    
+    try {
+      const { data: existingSettings } = await supabase
+        .from('allowance_settings')
+        .select('*')
+        .eq('user_id', userData.profile.id)
+        .single();
+
+      if (existingSettings) {
+        setUserProfile(prev => ({
+          ...prev,
+          allowances: {
+            domestic: existingSettings.domestic_daily_allowance || 5000,
+            overseas: existingSettings.overseas_daily_allowance || 10000,
+            transportation: existingSettings.transportation_daily_allowance || 2000,
+            accommodation: existingSettings.accommodation_daily_allowance || 10000
+          },
+          allowanceFlags: {
+            useTransportation: existingSettings.use_transportation_allowance ?? true,
+            useAccommodation: existingSettings.use_accommodation_allowance ?? true
+          }
+        }));
+      }
+    } catch (err) {
+      console.log('日当設定の読み込みに失敗しました（新規ユーザーの可能性）:', err);
+    }
+  };
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);
@@ -124,55 +166,88 @@ function MyPage({ onNavigate }: MyPageProps) {
   };
 
   const handleAllowancesSave = async () => {
-    if (!userData.profile) return;
+    console.log('handleAllowancesSave called');
+    
+    if (!userData.profile) {
+      console.log('No user profile available');
+      alert('ユーザープロフィールが取得できません');
+      return;
+    }
+    
+    console.log('Saving allowance settings for user:', userData.profile.id);
+    console.log('Current allowance settings:', userProfile.allowances);
+    console.log('Current allowance flags:', userProfile.allowanceFlags);
     
     try {
       // 既存の設定を確認
-      const { data: existingSettings } = await supabase
+      const { data: existingSettings, error: selectError } = await supabase
         .from('allowance_settings')
         .select('*')
         .eq('user_id', userData.profile.id)
         .single();
 
+      if (selectError && selectError.code !== 'PGRST116') {
+        console.error('Error checking existing settings:', selectError);
+        alert('日当設定の確認に失敗しました: ' + selectError.message);
+        return;
+      }
+
       if (existingSettings) {
+        console.log('Updating existing allowance settings');
         // 既存の設定を更新
         const { error } = await supabase
           .from('allowance_settings')
           .update({
-            domestic_daily_rate: userProfile.allowances.domestic,
-            overseas_daily_rate: userProfile.allowances.overseas,
-            transportation_rate: userProfile.allowances.transportation,
-            accommodation_rate: userProfile.allowances.accommodation,
+            domestic_daily_allowance: userProfile.allowances.domestic,
+            overseas_daily_allowance: userProfile.allowances.overseas,
+            transportation_daily_allowance: userProfile.allowances.transportation,
+            accommodation_daily_allowance: userProfile.allowances.accommodation,
+            use_transportation_allowance: userProfile.allowanceFlags.useTransportation,
+            use_accommodation_allowance: userProfile.allowanceFlags.useAccommodation,
             updated_at: new Date().toISOString()
           })
           .eq('user_id', userData.profile.id);
 
         if (error) {
+          console.error('Update error:', error);
           alert('日当設定の更新に失敗しました: ' + error.message);
           return;
         }
+        
+        console.log('Allowance settings updated successfully');
       } else {
+        console.log('Creating new allowance settings');
         // 新規作成
         const { error } = await supabase
           .from('allowance_settings')
           .insert({
             user_id: userData.profile.id,
-            domestic_daily_rate: userProfile.allowances.domestic,
-            overseas_daily_rate: userProfile.allowances.overseas,
-            transportation_rate: userProfile.allowances.transportation,
-            accommodation_rate: userProfile.allowances.accommodation
+            domestic_daily_allowance: userProfile.allowances.domestic,
+            overseas_daily_allowance: userProfile.allowances.overseas,
+            transportation_daily_allowance: userProfile.allowances.transportation,
+            accommodation_daily_allowance: userProfile.allowances.accommodation,
+            use_transportation_allowance: userProfile.allowanceFlags.useTransportation,
+            use_accommodation_allowance: userProfile.allowanceFlags.useAccommodation
           });
 
         if (error) {
+          console.error('Insert error:', error);
           alert('日当設定の作成に失敗しました: ' + error.message);
           return;
         }
+        
+        console.log('Allowance settings created successfully');
       }
 
+      // データを再読み込み
+      console.log('Reloading allowance settings');
+      await loadAllowanceSettings();
+      
+      console.log('Showing success alert');
       alert('日当設定が保存されました');
     } catch (err) {
-      alert('日当設定の保存に失敗しました');
-      console.error('Allowance settings save error:', err);
+      console.error('Unexpected error in handleAllowancesSave:', err);
+      alert('日当設定の保存に失敗しました: ' + (err instanceof Error ? err.message : '不明なエラー'));
     }
   };
 
@@ -315,7 +390,25 @@ function MyPage({ onNavigate }: MyPageProps) {
           <p className="text-xs text-slate-500 mt-1">1日あたりの海外出張日当</p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">交通費日当（円）</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-slate-700">交通費日当（円）</label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!userProfile.allowanceFlags.useTransportation}
+                onChange={(e) => setUserProfile(prev => ({
+                  ...prev,
+                  allowanceFlags: { ...prev.allowanceFlags, useTransportation: !e.target.checked },
+                  allowances: {
+                    ...prev.allowances,
+                    transportation: e.target.checked ? 0 : prev.allowances.transportation
+                  }
+                }))}
+                className="w-4 h-4 text-navy-600 border-slate-300 rounded focus:ring-navy-500 focus:ring-2"
+              />
+              <span className="text-xs text-slate-600">日当を使用しない</span>
+            </label>
+          </div>
           <input
             type="number"
             value={userProfile.allowances.transportation}
@@ -323,12 +416,40 @@ function MyPage({ onNavigate }: MyPageProps) {
               ...prev, 
               allowances: { ...prev.allowances, transportation: parseInt(e.target.value) || 0 }
             }))}
-            className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
+            disabled={!userProfile.allowanceFlags.useTransportation}
+            className={`w-full px-4 py-3 border border-white/40 rounded-lg backdrop-blur-xl ${
+              userProfile.allowanceFlags.useTransportation 
+                ? 'bg-white/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400' 
+                : 'bg-slate-100/50 text-slate-400 cursor-not-allowed'
+            }`}
           />
-          <p className="text-xs text-slate-500 mt-1">1日あたりの交通費日当</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {userProfile.allowanceFlags.useTransportation 
+              ? '1日あたりの交通費日当' 
+              : '交通費日当は使用されません（0円）'
+            }
+          </p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">宿泊日当（円）</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-slate-700">宿泊日当（円）</label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!userProfile.allowanceFlags.useAccommodation}
+                onChange={(e) => setUserProfile(prev => ({
+                  ...prev,
+                  allowanceFlags: { ...prev.allowanceFlags, useAccommodation: !e.target.checked },
+                  allowances: {
+                    ...prev.allowances,
+                    accommodation: e.target.checked ? 0 : prev.allowances.accommodation
+                  }
+                }))}
+                className="w-4 h-4 text-navy-600 border-slate-300 rounded focus:ring-navy-500 focus:ring-2"
+              />
+              <span className="text-xs text-slate-600">日当を使用しない</span>
+            </label>
+          </div>
           <input
             type="number"
             value={userProfile.allowances.accommodation}
@@ -336,9 +457,19 @@ function MyPage({ onNavigate }: MyPageProps) {
               ...prev, 
               allowances: { ...prev.allowances, accommodation: parseInt(e.target.value) || 0 }
             }))}
-            className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
+            disabled={!userProfile.allowanceFlags.useAccommodation}
+            className={`w-full px-4 py-3 border border-white/40 rounded-lg backdrop-blur-xl ${
+              userProfile.allowanceFlags.useAccommodation 
+                ? 'bg-white/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400' 
+                : 'bg-slate-100/50 text-slate-400 cursor-not-allowed'
+            }`}
           />
-          <p className="text-xs text-slate-500 mt-1">1泊あたりの宿泊日当</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {userProfile.allowanceFlags.useAccommodation 
+              ? '1泊あたりの宿泊日当' 
+              : '宿泊日当は使用されません（0円）'
+            }
+          </p>
         </div>
       </div>
 
@@ -348,25 +479,25 @@ function MyPage({ onNavigate }: MyPageProps) {
           <div className="text-center">
             <p className="text-slate-600 mb-1">国内日帰り出張</p>
             <p className="text-xl font-bold text-slate-800">
-              ¥{(userProfile.allowances.domestic + userProfile.allowances.transportation).toLocaleString()}
+              ¥{(userProfile.allowances.domestic + (userProfile.allowanceFlags.useTransportation ? userProfile.allowances.transportation : 0)).toLocaleString()}
             </p>
           </div>
           <div className="text-center">
             <p className="text-slate-600 mb-1">海外日帰り出張</p>
             <p className="text-xl font-bold text-slate-800">
-              ¥{(userProfile.allowances.overseas + userProfile.allowances.transportation).toLocaleString()}
+              ¥{(userProfile.allowances.overseas + (userProfile.allowanceFlags.useTransportation ? userProfile.allowances.transportation : 0)).toLocaleString()}
             </p>
           </div>
           <div className="text-center">
             <p className="text-slate-600 mb-1">国内1泊2日出張</p>
             <p className="text-xl font-bold text-slate-800">
-              ¥{((userProfile.allowances.domestic + userProfile.allowances.transportation) * 2 + userProfile.allowances.accommodation).toLocaleString()}
+              ¥{((userProfile.allowances.domestic + (userProfile.allowanceFlags.useTransportation ? userProfile.allowances.transportation : 0)) * 2 + (userProfile.allowanceFlags.useAccommodation ? userProfile.allowances.accommodation : 0)).toLocaleString()}
             </p>
           </div>
           <div className="text-center">
             <p className="text-slate-600 mb-1">海外2泊3日出張</p>
             <p className="text-xl font-bold text-slate-800">
-              ¥{((userProfile.allowances.overseas + userProfile.allowances.transportation) * 3 + userProfile.allowances.accommodation * 2).toLocaleString()}
+              ¥{((userProfile.allowances.overseas + (userProfile.allowanceFlags.useTransportation ? userProfile.allowances.transportation : 0)) * 3 + (userProfile.allowanceFlags.useAccommodation ? userProfile.allowances.accommodation * 2 : 0)).toLocaleString()}
             </p>
           </div>
         </div>

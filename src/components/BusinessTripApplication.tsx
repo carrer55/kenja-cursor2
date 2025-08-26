@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Calendar, MapPin, Upload, Calculator, Save, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, MapPin, Upload, Calculator, Save, Loader2, Globe } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
-import { useAuth } from '../hooks/useAuth';
+import { supabaseAuth } from '../lib/supabaseAuth';
 import { businessTripService } from '../lib/database';
+import { supabase } from '../lib/supabase';
 import type { Tables } from '../types/supabase';
 
 interface BusinessTripApplicationProps {
@@ -11,13 +12,15 @@ interface BusinessTripApplicationProps {
 }
 
 function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
-  const { user } = useAuth();
+  const authState = supabaseAuth.getAuthState();
+  const { user } = authState;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [formData, setFormData] = useState({
     purpose: '',
     startDate: '',
     endDate: '',
     destination: '',
+    isOverseas: false,
     estimatedExpenses: {
       dailyAllowance: 0,
       transportation: 0,
@@ -27,23 +30,83 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
     attachments: [] as File[]
   });
 
+  const [allowanceSettings, setAllowanceSettings] = useState({
+    domestic_daily_allowance: 15000,
+    overseas_daily_allowance: 25000,
+    transportation_daily_allowance: 6000,
+    accommodation_daily_allowance: 16000,
+    use_transportation_allowance: true,
+    use_accommodation_allowance: true
+  });
+
   const [dragActive, setDragActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>('');
 
-  // 出張日当の自動計算（1日あたり5,000円と仮定）
+  // マイページの日当設定を読み込む
+  useEffect(() => {
+    const loadAllowanceSettings = async () => {
+      if (!user?.id) {
+        console.log('No user ID available for loading allowance settings');
+        return;
+      }
+      
+      console.log('Loading allowance settings for user:', user.id);
+      
+      try {
+        const { data: existingSettings, error } = await supabase
+          .from('allowance_settings')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        if (error) {
+          console.log('Error loading allowance settings:', error);
+          return;
+        }
+
+        if (existingSettings) {
+          console.log('Loaded allowance settings:', existingSettings);
+          setAllowanceSettings({
+            domestic_daily_allowance: existingSettings.domestic_daily_allowance || 15000,
+            overseas_daily_allowance: existingSettings.overseas_daily_allowance || 25000,
+            transportation_daily_allowance: existingSettings.transportation_daily_allowance || 6000,
+            accommodation_daily_allowance: existingSettings.accommodation_daily_allowance || 16000,
+            use_transportation_allowance: existingSettings.use_transportation_allowance ?? true,
+            use_accommodation_allowance: existingSettings.use_accommodation_allowance ?? true
+          });
+        } else {
+          console.log('No allowance settings found, using defaults');
+        }
+      } catch (err) {
+        console.log('日当設定の読み込みに失敗しました（デフォルト値を使用）:', err);
+      }
+    };
+
+    loadAllowanceSettings();
+  }, [user?.id]);
+
+  // 出張日当の自動計算（マイページの日当設定を使用）
   const calculateDailyAllowance = () => {
     if (formData.startDate && formData.endDate) {
       const start = new Date(formData.startDate);
       const end = new Date(formData.endDate);
       const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      const dailyRate = 5000; // 1日あたりの日当
-      const transportationRate = 2000; // 1日あたりの交通費
-      const accommodationRate = 8000; // 1日あたりの宿泊費
+      
+      // マイページの日当設定を使用
+      const dailyRate = formData.isOverseas 
+        ? allowanceSettings.overseas_daily_allowance 
+        : allowanceSettings.domestic_daily_allowance;
+      const transportationRate = allowanceSettings.transportation_daily_allowance;
+      const accommodationRate = allowanceSettings.accommodation_daily_allowance;
 
+      // 計算式：
+      // 出張日当 = 日数 × 出張日当（国内/海外）
+      // 交通費 = 日数 × 交通費日当（使用フラグがtrueの場合のみ）
+      // 宿泊費 = (日数 - 1) × 宿泊日当（使用フラグがtrueで1泊以上の場合のみ）
       const dailyAllowance = days * dailyRate;
-      const transportation = days * transportationRate;
-      const accommodation = days > 1 ? (days - 1) * accommodationRate : 0;
+      const transportation = allowanceSettings.use_transportation_allowance ? days * transportationRate : 0;
+      const accommodation = (allowanceSettings.use_accommodation_allowance && days > 1) ? (days - 1) * accommodationRate : 0;
       const total = dailyAllowance + transportation + accommodation;
 
       setFormData(prev => ({
@@ -60,7 +123,7 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
 
   React.useEffect(() => {
     calculateDailyAllowance();
-  }, [formData.startDate, formData.endDate]);
+  }, [formData.startDate, formData.endDate, formData.isOverseas, allowanceSettings]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -119,6 +182,7 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
     setSubmitError('');
 
     try {
+      // 1. 出張申請を作成
       const businessTripData: Tables<'business_trip_applications'> = {
         user_id: user.id,
         title: `出張申請 - ${formData.destination}`,
@@ -137,6 +201,43 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
       const result = await businessTripService.createBusinessTripApplication(businessTripData);
       if (result.error) {
         throw new Error(result.error);
+      }
+
+      const applicationId = result.data?.id;
+      if (!applicationId) {
+        throw new Error('出張申請の作成に失敗しました');
+      }
+
+      // 2. 添付ファイル情報を保存（Storageバケットが利用できない場合の対応）
+      if (formData.attachments.length > 0) {
+        for (const file of formData.attachments) {
+          try {
+            // ファイル名をユニークにする
+            const timestamp = Date.now();
+            const uniqueFileName = `${timestamp}_${file.name}`;
+            
+            // データベースに添付ファイル情報を保存
+            const { error: dbError } = await supabase
+              .from('business_trip_attachments')
+              .insert({
+                business_trip_application_id: applicationId,
+                file_name: file.name,
+                file_size: file.size,
+                file_type: file.type,
+                file_url: null, // Storageバケットが利用できない場合はnull
+                file_path: `business_trip_attachments/${user.id}/${applicationId}/${uniqueFileName}` // 将来のStorageアップロード用パス
+              });
+
+            if (dbError) {
+              console.error('添付ファイル情報の保存エラー:', dbError);
+            } else {
+              console.log(`ファイル情報を保存しました: ${file.name}`);
+            }
+          } catch (fileError) {
+            console.error('ファイル処理エラー:', fileError);
+            // 個別のファイルエラーはスキップして続行
+          }
+        }
       }
 
       alert('出張申請が正常に送信されました！');
@@ -237,19 +338,33 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        <MapPin className="w-4 h-4 inline mr-1" />
-                        訪問先 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.destination}
-                        onChange={(e) => setFormData(prev => ({ ...prev, destination: e.target.value }))}
-                        className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-transparent backdrop-blur-xl"
-                        placeholder="訪問先を入力してください"
-                        required
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                          <MapPin className="w-4 h-4 inline mr-1" />
+                          訪問先 <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.destination}
+                          onChange={(e) => setFormData(prev => ({ ...prev, destination: e.target.value }))}
+                          className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-transparent backdrop-blur-xl"
+                          placeholder="訪問先を入力してください"
+                          required
+                        />
+                      </div>
+                      <div className="flex items-center">
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.isOverseas}
+                            onChange={(e) => setFormData(prev => ({ ...prev, isOverseas: e.target.checked }))}
+                            className="w-4 h-4 text-navy-600 border-slate-300 rounded focus:ring-navy-500 focus:ring-2"
+                          />
+                          <Globe className="w-4 h-4 text-slate-600" />
+                          <span className="text-sm font-medium text-slate-700">海外出張</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -263,29 +378,75 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white/30 rounded-lg p-4 backdrop-blur-sm">
-                      <p className="text-sm text-slate-600 mb-1">出張日当</p>
+                      <p className="text-sm text-slate-600 mb-1">
+                        出張日当
+                        <span className="text-xs text-slate-500 ml-2">
+                          ({formData.isOverseas ? '海外' : '国内'})
+                        </span>
+                      </p>
                       <p className="text-2xl font-bold text-slate-800">¥{formData.estimatedExpenses.dailyAllowance.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        ¥{formData.isOverseas ? allowanceSettings.overseas_daily_allowance : allowanceSettings.domestic_daily_allowance}/日
+                      </p>
                     </div>
-                    <div className="bg-white/30 rounded-lg p-4 backdrop-blur-sm">
+                    <div className={`bg-white/30 rounded-lg p-4 backdrop-blur-sm ${
+                      !allowanceSettings.use_transportation_allowance ? 'opacity-50' : ''
+                    }`}>
                       <p className="text-sm text-slate-600 mb-1">交通費</p>
                       <p className="text-2xl font-bold text-slate-800">¥{formData.estimatedExpenses.transportation.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {allowanceSettings.use_transportation_allowance 
+                          ? `¥${allowanceSettings.transportation_daily_allowance}/日`
+                          : '使用しない（0円）'
+                        }
+                      </p>
                     </div>
-                    <div className="bg-white/30 rounded-lg p-4 backdrop-blur-sm">
+                    <div className={`bg-white/30 rounded-lg p-4 backdrop-blur-sm ${
+                      !allowanceSettings.use_accommodation_allowance ? 'opacity-50' : ''
+                    }`}>
                       <p className="text-sm text-slate-600 mb-1">宿泊費</p>
                       <p className="text-2xl font-bold text-slate-800">¥{formData.estimatedExpenses.accommodation.toLocaleString()}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {allowanceSettings.use_accommodation_allowance 
+                          ? `¥${allowanceSettings.accommodation_daily_allowance}/泊`
+                          : '使用しない（0円）'
+                        }
+                      </p>
                     </div>
                     <div className="bg-gradient-to-r from-navy-600 to-navy-800 rounded-lg p-4 text-white">
                       <p className="text-sm text-navy-100 mb-1">合計</p>
                       <p className="text-2xl font-bold">¥{formData.estimatedExpenses.total.toLocaleString()}</p>
                     </div>
                   </div>
+                  
+                  {/* 計算詳細 */}
+                  <div className="mt-4 p-4 bg-white/20 rounded-lg">
+                    <h3 className="text-sm font-medium text-slate-700 mb-2">計算詳細</h3>
+                    <div className="text-xs text-slate-600 space-y-1">
+                      {formData.startDate && formData.endDate && (
+                        <>
+                          <p>出張期間: {formData.startDate} 〜 {formData.endDate}</p>
+                          <p>日数: {Math.ceil((new Date(formData.endDate).getTime() - new Date(formData.startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1}日</p>
+                          <p>出張日当: {formData.isOverseas ? '海外' : '国内'} ¥{formData.isOverseas ? allowanceSettings.overseas_daily_allowance : allowanceSettings.domestic_daily_allowance}/日</p>
+                          <p>交通費: {allowanceSettings.use_transportation_allowance 
+                            ? `¥${allowanceSettings.transportation_daily_allowance}/日`
+                            : '使用しない（0円）'
+                          }</p>
+                          <p>宿泊費: {allowanceSettings.use_accommodation_allowance 
+                            ? `¥${allowanceSettings.accommodation_daily_allowance}/泊`
+                            : '使用しない（0円）'
+                          }</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                {/* 写真添付 */}
+                {/* 資料添付 */}
                 <div className="backdrop-blur-xl bg-white/20 rounded-xl p-6 border border-white/30 shadow-xl">
                   <h2 className="text-xl font-semibold text-slate-800 mb-4">
                     <Upload className="w-5 h-5 inline mr-2" />
-                    写真添付
+                    資料添付
                   </h2>
                   
                   <div
@@ -304,7 +465,7 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
                     <input
                       type="file"
                       multiple
-                      accept="image/*"
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png,.gif"
                       onChange={handleFileInput}
                       className="hidden"
                       id="file-upload"

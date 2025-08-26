@@ -28,6 +28,9 @@ class SupabaseAuth {
     isOnboardingComplete: false
   }
   private listeners: ((state: AuthState) => void)[] = []
+  private authSubscription: any = null
+  private sessionCheckInterval: any = null
+  private autoRefreshInterval: any = null
 
   static getInstance(): SupabaseAuth {
     if (!SupabaseAuth.instance) {
@@ -41,25 +44,107 @@ class SupabaseAuth {
   }
 
   private async initializeAuth() {
-    // 現在のセッションを取得
-    const { data: { session } } = await supabase.auth.getSession()
-    
-    if (session?.user) {
-      await this.setUserFromSession(session.user)
-    }
-
-    // 認証状態の変更を監視
-    supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
+    try {
+      // 現在のセッションを取得
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (session?.user) {
+        console.log('Initial session found:', session.user.id)
         await this.setUserFromSession(session.user)
-      } else if (event === 'SIGNED_OUT') {
-        this.clearAuthState()
+      } else {
+        console.log('No initial session found')
       }
-    })
+
+      // 認証状態の変更を監視
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('Auth state change:', event, session?.user?.id)
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          await this.setUserFromSession(session.user)
+        } else if (event === 'SIGNED_OUT') {
+          this.clearAuthState()
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          // トークンが更新された場合もユーザー情報を再取得
+          await this.setUserFromSession(session.user)
+        } else if (event === 'USER_UPDATED' && session?.user) {
+          // ユーザー情報が更新された場合も再取得
+          await this.setUserFromSession(session.user)
+        } else if (event === 'INITIAL_SESSION' && session?.user) {
+          // 初期セッションが設定された場合
+          await this.setUserFromSession(session.user)
+        } else if (event === 'MFA_CHALLENGE_VERIFIED' && session?.user) {
+          // MFA認証が完了した場合
+          await this.setUserFromSession(session.user)
+        }
+      })
+
+      // サブスクリプションを保存してクリーンアップ時に使用
+      this.authSubscription = subscription
+
+      // セッションの自動リフレッシュを設定
+      this.autoRefreshInterval = setInterval(async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.user) {
+            // セッションが有効期限の5分前に近づいている場合はリフレッシュ
+            const expiresAt = session.expires_at
+            if (expiresAt) {
+              const now = Math.floor(Date.now() / 1000)
+              const timeUntilExpiry = expiresAt - now
+              
+              if (timeUntilExpiry < 300) { // 5分未満
+                console.log('Session expiring soon, refreshing...')
+                const { data, error } = await supabase.auth.refreshSession()
+                if (error) {
+                  console.error('Session refresh error:', error)
+                } else if (data.session) {
+                  console.log('Session refreshed successfully')
+                  await this.setUserFromSession(data.session.user)
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Auto session refresh error:', error)
+        }
+      }, 60 * 1000) // 1分ごとにチェック
+
+      // 定期的にセッション状態を確認（30秒ごと）
+      this.sessionCheckInterval = setInterval(async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.user && this.authState.user?.id !== session.user.id) {
+            console.log('Session refresh detected, updating user data')
+            await this.setUserFromSession(session.user)
+          } else if (!session?.user && this.authState.isAuthenticated) {
+            console.log('Session expired, clearing auth state')
+            this.clearAuthState()
+          } else if (session?.user && this.authState.isAuthenticated) {
+            // セッションが有効な場合は、トークンの有効性を確認
+            try {
+              const { data: { user } } = await supabase.auth.getUser()
+              if (!user) {
+                console.log('User token invalid, clearing auth state')
+                this.clearAuthState()
+              }
+            } catch (tokenError) {
+              console.log('Token validation error, clearing auth state')
+              this.clearAuthState()
+            }
+          }
+        } catch (error) {
+          console.error('Session refresh check error:', error)
+        }
+      }, 30 * 1000) // 30秒
+    } catch (error) {
+      console.error('Auth initialization error:', error)
+    }
   }
 
   private async setUserFromSession(user: User) {
     try {
+      console.log('Setting user from session:', user.id)
+      
       // プロフィール情報を取得
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -107,6 +192,7 @@ class SupabaseAuth {
         }
       }
 
+      console.log('Auth state updated:', this.authState)
       this.notifyListeners()
     } catch (error) {
       console.error('Error setting user from session:', error)
@@ -297,6 +383,26 @@ class SupabaseAuth {
 
   getAuthState(): AuthState {
     return this.authState
+  }
+
+  // クリーンアップメソッド
+  cleanup() {
+    if (this.authSubscription) {
+      this.authSubscription.unsubscribe()
+      this.authSubscription = null
+    }
+    
+    if (this.sessionCheckInterval) {
+      clearInterval(this.sessionCheckInterval)
+      this.sessionCheckInterval = null
+    }
+    
+    if (this.autoRefreshInterval) {
+      clearInterval(this.autoRefreshInterval)
+      this.autoRefreshInterval = null
+    }
+    
+    this.listeners = []
   }
 }
 

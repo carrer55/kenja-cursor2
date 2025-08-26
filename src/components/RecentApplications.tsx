@@ -17,7 +17,6 @@ function RecentApplications({ onShowDetail, onNavigate }: RecentApplicationsProp
         id: app.id,
         date: app.created_at,
         type: '経費申請',
-        applicant: userData.profile?.full_name || '不明',
         amount: `¥${app.amount.toLocaleString()}`,
         status: getStatusText(app.status),
         statusColor: getStatusColor(app.status),
@@ -27,7 +26,6 @@ function RecentApplications({ onShowDetail, onNavigate }: RecentApplicationsProp
         id: app.id,
         date: app.created_at,
         type: '出張申請',
-        applicant: userData.profile?.full_name || '不明',
         amount: `¥${app.estimated_cost.toLocaleString()}`,
         status: getStatusText(app.status),
         statusColor: getStatusColor(app.status),
@@ -83,22 +81,20 @@ function RecentApplications({ onShowDetail, onNavigate }: RecentApplicationsProp
           <div className="h-5 w-5 bg-slate-300 rounded animate-pulse"></div>
         </div>
         <div className="space-y-3">
-          <div className="grid grid-cols-5 gap-2 lg:gap-4 text-xs font-medium text-slate-600 pb-2 border-b border-white/30">
-            <span>日付</span>
+          <div className="grid grid-cols-4 gap-2 lg:gap-4 text-xs font-medium text-slate-600 pb-2 border-b border-white/30">
+            <span>申請日</span>
             <span>種別</span>
-            <span>申請者</span>
             <span>金額</span>
             <span>ステータス</span>
           </div>
-          {[1, 2, 3].map((index) => (
-            <div key={index} className="grid grid-cols-5 gap-2 lg:gap-4 items-center py-3">
-              <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
-              <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
-              <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
-              <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
-              <div className="h-6 bg-slate-300 rounded animate-pulse"></div>
-            </div>
-          ))}
+                      {[1, 2, 3].map((index) => (
+              <div key={index} className="grid grid-cols-4 gap-2 lg:gap-4 items-center py-3">
+                <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
+                <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
+                <div className="h-4 bg-slate-300 rounded animate-pulse"></div>
+                <div className="h-6 bg-slate-300 rounded animate-pulse"></div>
+              </div>
+            ))}
         </div>
       </div>
     );
@@ -123,10 +119,9 @@ function RecentApplications({ onShowDetail, onNavigate }: RecentApplicationsProp
       <div className="overflow-hidden relative z-10">
         <div className="overflow-x-auto">
           <div className="space-y-3">
-            <div className="grid grid-cols-5 gap-2 lg:gap-4 text-xs font-medium text-slate-600 pb-2 border-b border-white/30 min-w-max">
-              <span>日付</span>
+            <div className="grid grid-cols-4 gap-2 lg:gap-4 text-xs font-medium text-slate-600 pb-2 border-b border-white/30 min-w-max">
+              <span>申請日</span>
               <span>種別</span>
-              <span>申請者</span>
               <span>金額</span>
               <span>ステータス</span>
             </div>
@@ -134,12 +129,11 @@ function RecentApplications({ onShowDetail, onNavigate }: RecentApplicationsProp
               applications.map((app) => (
                 <div 
                   key={app.id} 
-                  className="grid grid-cols-5 gap-2 lg:gap-4 items-center py-3 hover:bg-white/20 rounded-lg px-2 transition-colors min-w-max cursor-pointer"
+                  className="grid grid-cols-4 gap-2 lg:gap-4 items-center py-3 rounded-lg px-2 min-w-max cursor-pointer"
                   onClick={() => onShowDetail(app.originalType, app.id)}
                 >
                   <span className="text-slate-700 text-sm">{formatDate(app.date)}</span>
                   <span className="text-slate-700 text-sm">{app.type}</span>
-                  <span className="text-slate-700 text-sm">{app.applicant}</span>
                   <span className="text-slate-900 font-medium text-sm">{app.amount}</span>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${app.statusColor}`}>
                     {app.status}

@@ -13,7 +13,7 @@ import {
   Users
 } from 'lucide-react';
 import { useUserData } from '../hooks/useUserData';
-import { useAuth } from '../hooks/useAuth';
+import { supabaseAuth } from '../lib/supabaseAuth';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -24,7 +24,14 @@ interface SidebarProps {
 
 function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: SidebarProps) {
   const { userData } = useUserData();
-  const { logout } = useAuth();
+  const handleLogout = async () => {
+    try {
+      await supabaseAuth.logout();
+      // ログアウト後の処理は必要に応じて追加
+    } catch (error) {
+      console.error('ログアウトエラー:', error);
+    }
+  };
 
   // ユーザーの役割に基づいてメニュー項目を生成
   const getMenuItems = () => {
@@ -57,10 +64,7 @@ function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: Sid
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    // ログアウト後の処理はAuthWrapperで自動的に処理される
-  };
+
 
   const menuItems = getMenuItems();
 

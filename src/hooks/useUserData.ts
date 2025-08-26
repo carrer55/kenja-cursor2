@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from './useAuth';
+import { supabaseAuth } from '../lib/supabaseAuth';
 import type { Tables } from '../types/supabase';
 
 export interface UserData {
@@ -19,7 +19,8 @@ export interface UserData {
 }
 
 export function useUserData() {
-  const { user, isAuthenticated } = useAuth();
+  const authState = supabaseAuth.getAuthState();
+  const { user, isAuthenticated } = authState;
   const [userData, setUserData] = useState<UserData>({
     profile: null,
     applications: { expense: [], businessTrip: [] },
@@ -203,8 +204,13 @@ export function useUserData() {
 
   // 認証状態が変更されたときにデータを取得
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+    if (isAuthenticated && user?.id) {
+      console.log('User authenticated, fetching data for:', user.id);
+      fetchAllData();
+    } else {
+      console.log('User not authenticated or no user ID');
+    }
+  }, [isAuthenticated, user?.id, fetchAllData]);
 
   // データを更新
   const refreshData = useCallback(() => {

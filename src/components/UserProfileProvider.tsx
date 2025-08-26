@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { supabaseAuth } from '../lib/supabaseAuth';
 
 interface UserProfile {
   id: string;
@@ -19,7 +19,8 @@ interface UserProfileContextType {
 const UserProfileContext = createContext<UserProfileContextType | undefined>(undefined);
 
 export function UserProfileProvider({ children }: { children: React.ReactNode }) {
-  const { user, updateProfile, loading } = useAuth();
+  const authState = supabaseAuth.getAuthState();
+  const { user, loading } = authState;
 
   const profile = user ? {
     id: user.id,
@@ -29,6 +30,13 @@ export function UserProfileProvider({ children }: { children: React.ReactNode })
     position: user.position,
     phone: user.phone
   } : null;
+
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return { success: false, error: 'ユーザーが見つかりません' };
+    
+    const result = await supabaseAuth.updateProfile(updates);
+    return result;
+  };
 
   return (
     <UserProfileContext.Provider value={{ profile, updateProfile, loading }}>

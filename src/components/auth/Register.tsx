@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, UserPlus, ArrowLeft, User, Building, Phone, Briefcase, Users } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { supabaseAuth } from '../../lib/supabaseAuth';
 
 interface RegisterProps {
   onNavigate: (view: string) => void;
@@ -20,7 +20,7 @@ function Register({ onNavigate }: RegisterProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
-  const { register: registerUser, loading } = useAuth();
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,20 +37,27 @@ function Register({ onNavigate }: RegisterProps) {
       return;
     }
 
-    const result = await registerUser({
-      email: formData.email,
-      password: formData.password,
-      name: formData.name,
-      company: formData.company,
-      position: formData.position,
-      phone: formData.phone,
-      department: formData.department
-    });
+    setLoading(true);
+    try {
+      const result = await supabaseAuth.register({
+        email: formData.email,
+        password: formData.password,
+        name: formData.name,
+        company: formData.company,
+        position: formData.position,
+        phone: formData.phone,
+        department: formData.department
+      });
 
-    if (result.success) {
-      onNavigate('register-success');
-    } else {
-      setError(result.error || '登録に失敗しました');
+      if (result.success) {
+        onNavigate('register-success');
+      } else {
+        setError(result.error || '登録に失敗しました');
+      }
+    } catch (error) {
+      setError('登録に失敗しました');
+    } finally {
+      setLoading(false);
     }
   };
 

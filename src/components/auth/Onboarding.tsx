@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { User, Building, Phone, Briefcase, CheckCircle, Users } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { supabaseAuth } from '../../lib/supabaseAuth';
 import { supabase } from '../../lib/supabase';
 
 interface OnboardingProps {
@@ -19,7 +19,8 @@ function Onboarding({ onNavigate, onComplete }: OnboardingProps) {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
+  const authState = supabaseAuth.getAuthState();
+  const { user } = authState;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -3,6 +3,9 @@ import { Search, Filter, Download, FileText, Calendar, MapPin, BarChart3, Trendi
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import AdvancedSearch from './AdvancedSearch';
+import { supabase } from '../lib/supabase';
+import { supabaseAuth } from '../lib/supabaseAuth';
+import type { Tables } from '../types/supabase';
 
 interface DocumentManagementProps {
   onNavigate: (view: string, documentType?: string) => void;
@@ -12,105 +15,128 @@ interface Document {
   id: string;
   title: string;
   type: 'business-report' | 'allowance-detail' | 'expense-settlement' | 'travel-detail' | 'gps-log' | 'monthly-report' | 'annual-report';
-  status: 'draft' | 'submitted' | 'approved' | 'completed';
+  status: 'draft' | 'submitted' | 'approved' | 'completed' | 'paid';
   createdAt: string;
   updatedAt: string;
   size: string;
   thumbnail: string;
   description: string;
+  documentType: string; // 実際のテーブル名
+  documentId: string; // 実際のレコードID
 }
 
 function DocumentManagement({ onNavigate }: DocumentManagementProps) {
+  const authState = supabaseAuth.getAuthState();
+  const { user } = authState;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // サンプルデータの初期化
-    const sampleDocuments: Document[] = [
-      {
-        id: '1',
-        title: '東京出張報告書_2024年7月',
-        type: 'business-report',
-        status: 'submitted',
-        createdAt: '2024-07-20T10:00:00Z',
-        updatedAt: '2024-07-20T15:30:00Z',
-        size: '2.3MB',
-        thumbnail: '📋',
-        description: '東京クライアント訪問の出張報告書'
-      },
-      {
-        id: '2',
-        title: '7月度日当支給明細',
-        type: 'allowance-detail',
-        status: 'completed',
-        createdAt: '2024-07-31T09:00:00Z',
-        updatedAt: '2024-07-31T09:00:00Z',
-        size: '1.8MB',
-        thumbnail: '💰',
-        description: '7月度の出張日当支給明細書'
-      },
-      {
-        id: '3',
-        title: '7月度旅費精算書',
-        type: 'expense-settlement',
-        status: 'approved',
-        createdAt: '2024-07-31T14:00:00Z',
-        updatedAt: '2024-08-01T10:00:00Z',
-        size: '3.1MB',
-        thumbnail: '🧾',
-        description: '7月度の旅費精算書'
-      },
-      {
-        id: '4',
-        title: '7月度旅費明細書',
-        type: 'travel-detail',
-        status: 'completed',
-        createdAt: '2024-07-31T16:00:00Z',
-        updatedAt: '2024-07-31T16:00:00Z',
-        size: '2.7MB',
-        thumbnail: '✈️',
-        description: '7月度の旅費明細書'
-      },
-      {
-        id: '5',
-        title: '出張ログ台帳_2024年7月',
-        type: 'gps-log',
-        status: 'completed',
-        createdAt: '2024-07-31T18:00:00Z',
-        updatedAt: '2024-07-31T18:00:00Z',
-        size: '5.2MB',
-        thumbnail: '📍',
-        description: 'GPS位置情報と領収書ハッシュ記録'
-      },
-      {
-        id: '6',
-        title: '7月度月次レポート',
-        type: 'monthly-report',
-        status: 'completed',
-        createdAt: '2024-08-01T09:00:00Z',
-        updatedAt: '2024-08-01T09:00:00Z',
-        size: '4.5MB',
-        thumbnail: '📊',
-        description: '7月度の出張・経費月次集計レポート'
-      },
-      {
-        id: '7',
-        title: '2024年度年次レポート',
-        type: 'annual-report',
-        status: 'draft',
-        createdAt: '2024-08-01T11:00:00Z',
-        updatedAt: '2024-08-01T11:00:00Z',
-        size: '8.9MB',
-        thumbnail: '📈',
-        description: '2024年度の年次集計レポート'
+    if (user) {
+      loadDocuments();
+    }
+  }, [user]);
+
+  const loadDocuments = async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      const allDocuments: Document[] = [];
+
+      // 出張報告書を読み込み
+      const { data: reports, error: reportsError } = await supabase
+        .from('business_trip_reports')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (reportsError) {
+        console.error('出張報告書の読み込みエラー:', reportsError);
+      } else if (reports) {
+        reports.forEach(report => {
+          allDocuments.push({
+            id: report.id,
+            title: report.report_title,
+            type: 'business-report',
+            status: report.status,
+            createdAt: report.created_at,
+            updatedAt: report.updated_at,
+            size: '2.3MB', // 仮のサイズ
+            thumbnail: '📋',
+            description: `${report.destination}への出張報告書`,
+            documentType: 'business_trip_reports',
+            documentId: report.id
+          });
+        });
       }
-    ];
-    setDocuments(sampleDocuments);
-  }, []);
+
+      // 日当支給明細を読み込み
+      const { data: allowances, error: allowancesError } = await supabase
+        .from('daily_allowance_statements')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (allowancesError) {
+        console.error('日当支給明細の読み込みエラー:', allowancesError);
+      } else if (allowances) {
+        allowances.forEach(allowance => {
+          allDocuments.push({
+            id: allowance.id,
+            title: allowance.statement_title,
+            type: 'allowance-detail',
+            status: allowance.status,
+            createdAt: allowance.created_at,
+            updatedAt: allowance.updated_at,
+            size: '1.8MB', // 仮のサイズ
+            thumbnail: '💰',
+            description: `${allowance.period_start}〜${allowance.period_end}の日当支給明細`,
+            documentType: 'daily_allowance_statements',
+            documentId: allowance.id
+          });
+        });
+      }
+
+      // 旅費精算書を読み込み
+      const { data: expenses, error: expensesError } = await supabase
+        .from('travel_expense_statements')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (expensesError) {
+        console.error('旅費精算書の読み込みエラー:', expensesError);
+      } else if (expenses) {
+        expenses.forEach(expense => {
+          allDocuments.push({
+            id: expense.id,
+            title: expense.statement_title,
+            type: 'expense-settlement',
+            status: expense.status,
+            createdAt: expense.created_at,
+            updatedAt: expense.updated_at,
+            size: '3.1MB', // 仮のサイズ
+            thumbnail: '🧾',
+            description: `${expense.destination}への旅費精算書`,
+            documentType: 'travel_expense_statements',
+            documentId: expense.id
+          });
+        });
+      }
+
+      setDocuments(allDocuments);
+    } catch (error) {
+      console.error('書類の読み込みエラー:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);
@@ -134,7 +160,8 @@ function DocumentManagement({ onNavigate }: DocumentManagementProps) {
       'draft': '下書き',
       'submitted': '提出済み',
       'approved': '承認済み',
-      'completed': '完了'
+      'completed': '完了',
+      'paid': '支払い済み'
     };
     return labels[status as keyof typeof labels] || status;
   };
@@ -144,7 +171,8 @@ function DocumentManagement({ onNavigate }: DocumentManagementProps) {
       'draft': 'text-slate-700 bg-slate-100',
       'submitted': 'text-amber-700 bg-amber-100',
       'approved': 'text-blue-700 bg-blue-100',
-      'completed': 'text-emerald-700 bg-emerald-100'
+      'completed': 'text-emerald-700 bg-emerald-100',
+      'paid': 'text-green-700 bg-green-100'
     };
     return colors[status as keyof typeof colors] || 'text-slate-700 bg-slate-100';
   };
@@ -158,7 +186,11 @@ function DocumentManagement({ onNavigate }: DocumentManagementProps) {
   });
 
   const handleCreateDocument = (type: string) => {
-    onNavigate('document-creation', type);
+    if (type === 'business-report') {
+      onNavigate('business-trip-report-creation');
+    } else {
+      onNavigate('document-creation', type);
+    }
   };
 
   const handlePreviewDocument = (documentId: string) => {
@@ -278,76 +310,91 @@ function DocumentManagement({ onNavigate }: DocumentManagementProps) {
               </div>
 
               {/* 書類一覧 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredDocuments.map((document) => (
-                  <div key={document.id} className="backdrop-blur-xl bg-white/10 rounded-lg border border-white/20 shadow-lg hover:shadow-xl hover:bg-white/15 transition-all duration-300 overflow-hidden">
-                    {/* サムネイル */}
-                    <div className="h-24 bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center border-b border-white/10">
-                      <FileText className="w-8 h-8 text-slate-300" />
-                    </div>
-                    
-                    {/* 書類情報 */}
-                    <div className="p-3">
-                      <div className="flex items-start justify-between mb-2">
-                        <h3 className="font-medium text-slate-800 text-sm leading-tight line-clamp-2">{document.title}</h3>
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(document.status)} ml-2 flex-shrink-0`}>
-                          {getStatusLabel(document.status)}
-                        </span>
-                      </div>
-                      
-                      <p className="text-xs text-slate-600 mb-2 line-clamp-1">{getTypeLabel(document.type)}</p>
-                      
-                      <div className="space-y-1 text-xs text-slate-500 mb-3">
-                        <div className="flex justify-between">
-                          <span>作成日:</span>
-                          <span className="text-slate-600">{new Date(document.createdAt).toLocaleDateString('ja-JP')}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>サイズ:</span>
-                          <span className="text-slate-600">{document.size}</span>
-                        </div>
-                      </div>
-                      
-                      {/* アクションボタン */}
-                      <div className="flex justify-between pt-2 border-t border-white/20">
-                        <button
-                          onClick={() => handlePreviewDocument(document.id)}
-                          className="flex items-center space-x-1 px-2 py-1 text-slate-600 hover:text-slate-800 hover:bg-white/20 rounded transition-colors"
-                        >
-                          <Eye className="w-3 h-3" />
-                          <span className="text-xs">表示</span>
-                        </button>
-                        <button
-                          onClick={() => handleCreateDocument(document.type)}
-                          className="flex items-center space-x-1 px-2 py-1 text-slate-600 hover:text-slate-800 hover:bg-white/20 rounded transition-colors"
-                        >
-                          <Edit className="w-3 h-3" />
-                          <span className="text-xs">編集</span>
-                        </button>
-                        <button
-                          onClick={() => handleDownloadDocument(document.id)}
-                          className="flex items-center space-x-1 px-2 py-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100/20 rounded transition-colors"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span className="text-xs">DL</span>
-                        </button>
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map((index) => (
+                    <div key={index} className="backdrop-blur-xl bg-white/10 rounded-lg border border-white/20 shadow-lg overflow-hidden animate-pulse">
+                      <div className="h-24 bg-slate-300 rounded-t-lg"></div>
+                      <div className="p-3 space-y-2">
+                        <div className="h-4 bg-slate-300 rounded w-3/4"></div>
+                        <div className="h-3 bg-slate-300 rounded w-1/2"></div>
+                        <div className="h-3 bg-slate-300 rounded w-2/3"></div>
+                        <div className="h-3 bg-slate-300 rounded w-1/3"></div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-
-              {filteredDocuments.length === 0 && (
-                <div className="text-center py-12">
-                  <FileText className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-                  <p className="text-slate-600 text-base font-medium">
-                    {searchTerm || filterType !== 'all' || filterStatus !== 'all' 
-                      ? '条件に一致する書類が見つかりません' 
-                      : '書類がまだ作成されていません'}
-                  </p>
-                  <p className="text-slate-500 text-sm mt-2">上部のボタンから新しい書類を作成してください</p>
+                  ))}
                 </div>
-              )}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {filteredDocuments.map((document) => (
+                    <div key={document.id} className="backdrop-blur-xl bg-white/10 rounded-lg border border-white/20 shadow-lg hover:shadow-xl hover:bg-white/15 transition-all duration-300 overflow-hidden">
+                      {/* サムネイル */}
+                      <div className="h-24 bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center border-b border-white/10">
+                        <FileText className="w-8 h-8 text-slate-300" />
+                      </div>
+                      
+                      {/* 書類情報 */}
+                      <div className="p-3">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="font-medium text-slate-800 text-sm leading-tight line-clamp-2">{document.title}</h3>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(document.status)} ml-2 flex-shrink-0`}>
+                            {getStatusLabel(document.status)}
+                          </span>
+                        </div>
+                        
+                        <p className="text-xs text-slate-600 mb-2 line-clamp-1">{getTypeLabel(document.type)}</p>
+                        
+                        <div className="space-y-1 text-xs text-slate-500 mb-3">
+                          <div className="flex justify-between">
+                            <span>作成日:</span>
+                            <span className="text-slate-600">{new Date(document.createdAt).toLocaleDateString('ja-JP')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>サイズ:</span>
+                            <span className="text-slate-600">{document.size}</span>
+                          </div>
+                        </div>
+                        
+                        {/* アクションボタン */}
+                        <div className="flex justify-between pt-2 border-t border-white/20">
+                          <button
+                            onClick={() => handlePreviewDocument(document.id)}
+                            className="flex items-center space-x-1 px-2 py-1 text-slate-600 hover:text-slate-800 hover:bg-white/20 rounded transition-colors"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span className="text-xs">表示</span>
+                          </button>
+                          <button
+                            onClick={() => handleCreateDocument(document.type)}
+                            className="flex items-center space-x-1 px-2 py-1 text-slate-600 hover:text-slate-800 hover:bg-white/20 rounded transition-colors"
+                          >
+                            <Edit className="w-3 h-3" />
+                            <span className="text-xs">編集</span>
+                          </button>
+                          <button
+                            onClick={() => handleDownloadDocument(document.id)}
+                            className="flex items-center space-x-1 px-2 py-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100/20 rounded transition-colors"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span className="text-xs">DL</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {filteredDocuments.length === 0 && (
+                  <div className="text-center py-12">
+                    <FileText className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                    <p className="text-slate-600 text-base font-medium">
+                      {searchTerm || filterType !== 'all' || filterStatus !== 'all' 
+                        ? '条件に一致する書類が見つかりません' 
+                        : '書類がまだ作成されていません'}
+                    </p>
+                    <p className="text-slate-500 text-sm mt-2">上部のボタンから新しい書類を作成してください</p>
+                  </div>
+                )}
             </div>
 
             {/* 高度検索モーダル */}

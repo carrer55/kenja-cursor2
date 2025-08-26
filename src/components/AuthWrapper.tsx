@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { supabaseAuth } from '../lib/supabaseAuth';
 import Login from './auth/Login';
 import Register from './auth/Register';
 import RegisterSuccess from './auth/RegisterSuccess';
@@ -10,14 +10,28 @@ import Dashboard from './Dashboard';
 
 function AuthWrapper() {
   const [currentView, setCurrentView] = useState<string>('login');
-  const { isAuthenticated, loading } = useAuth();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const authState = supabaseAuth.getAuthState();
+    setIsAuthenticated(authState.isAuthenticated);
+    setLoading(false);
+
+    const unsubscribe = supabaseAuth.subscribe((newState) => {
+      setIsAuthenticated(newState.isAuthenticated);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, []);
 
   const handleLoginSuccess = () => {
-    // ログイン成功時の処理は useAuth フックで自動的に処理される
+    // ログイン成功時の処理
   };
 
   const handleOnboardingComplete = () => {
-    // オンボーディング完了時の処理も useAuth フックで自動的に処理される
+    // オンボーディング完了時の処理
   };
 
   const navigateToView = (view: string) => {

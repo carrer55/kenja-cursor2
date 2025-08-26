@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, LogIn, UserPlus, RotateCcw } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { supabaseAuth } from '../../lib/supabaseAuth';
 
 interface LoginProps {
   onNavigate: (view: string) => void;
@@ -12,18 +12,29 @@ function Login({ onNavigate, onLoginSuccess }: LoginProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const { login, loading } = useAuth();
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    const result = await login(email, password);
-    
-    if (result.success) {
-      onLoginSuccess();
-    } else {
-      setError(result.error || 'ログインに失敗しました');
+    if (!email || !password) {
+      setError('メールアドレスとパスワードを入力してください');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await supabaseAuth.login(email, password);
+      if (result.success) {
+        onLoginSuccess();
+      } else {
+        setError(result.error || 'ログインに失敗しました');
+      }
+    } catch (error) {
+      setError('ログインに失敗しました');
+    } finally {
+      setLoading(false);
     }
   };
 
