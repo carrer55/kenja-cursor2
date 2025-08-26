@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { User, Settings, CreditCard, Bell, Users, HelpCircle, Edit, Save, Eye, EyeOff, Link } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { User, Settings, CreditCard, Bell, Users, Edit, Save, Link } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useUserData } from '../hooks/useUserData';
+import { supabase } from '../lib/supabase';
 
 interface MyPageProps {
   onNavigate: (view: string) => void;
@@ -30,20 +32,22 @@ interface NotificationSettings {
 }
 
 function MyPage({ onNavigate }: MyPageProps) {
+  const { userData, refreshData } = useUserData();
+  
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
   const [showPasswordChange, setShowPasswordChange] = useState(false);
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [] = useState(false);
+  const [] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   
   const [userProfile, setUserProfile] = useState<UserProfile>({
-    name: '山田太郎',
-    position: '代表取締役',
-    email: 'yamada@example.com',
-    phone: '090-1234-5678',
-    company: '株式会社サンプル',
-    department: '経営企画部',
+    name: '',
+    position: '',
+    email: '',
+    phone: '',
+    company: '',
+    department: '',
     allowances: {
       domestic: 5000,
       overseas: 10000,
@@ -59,37 +63,125 @@ function MyPage({ onNavigate }: MyPageProps) {
     approvalOnly: false
   });
 
-  const [passwordData, setPasswordData] = useState({
+  const [] = useState({
     current: '',
     new: '',
     confirm: ''
   });
 
+  // ユーザーデータからプロフィール情報を取得
+  useEffect(() => {
+    if (userData.profile) {
+      setUserProfile({
+        name: userData.profile.full_name || '',
+        position: userData.profile.position || '',
+        email: userData.profile.email || '',
+        phone: userData.profile.phone || '',
+        company: userData.profile.company || '',
+        department: userData.profile.department || '',
+        allowances: {
+          domestic: 5000,
+          overseas: 10000,
+          transportation: 2000,
+          accommodation: 10000
+        }
+      });
+    }
+  }, [userData.profile]);
+
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
 
-  const handleProfileSave = () => {
-    // プロフィール情報をローカルストレージに保存
-    localStorage.setItem('userProfile', JSON.stringify(userProfile));
-    alert('プロフィールが更新されました');
+  const handleProfileSave = async () => {
+    if (!userData.profile) return;
+    
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          full_name: userProfile.name,
+          position: userProfile.position,
+          phone: userProfile.phone,
+          company: userProfile.company,
+          department: userProfile.department,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userData.profile.id);
+
+      if (error) {
+        alert('プロフィールの更新に失敗しました: ' + error.message);
+        return;
+      }
+
+      // データを再取得
+      await refreshData();
+      alert('プロフィールが更新されました');
+    } catch (err) {
+      alert('プロフィールの更新に失敗しました');
+      console.error('Profile update error:', err);
+    }
   };
 
-  const handlePasswordChange = () => {
-    setShowPasswordModal(true);
+  const handleAllowancesSave = async () => {
+    if (!userData.profile) return;
+    
+    try {
+      // 既存の設定を確認
+      const { data: existingSettings } = await supabase
+        .from('allowance_settings')
+        .select('*')
+        .eq('user_id', userData.profile.id)
+        .single();
+
+      if (existingSettings) {
+        // 既存の設定を更新
+        const { error } = await supabase
+          .from('allowance_settings')
+          .update({
+            domestic_daily_rate: userProfile.allowances.domestic,
+            overseas_daily_rate: userProfile.allowances.overseas,
+            transportation_rate: userProfile.allowances.transportation,
+            accommodation_rate: userProfile.allowances.accommodation,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userData.profile.id);
+
+        if (error) {
+          alert('日当設定の更新に失敗しました: ' + error.message);
+          return;
+        }
+      } else {
+        // 新規作成
+        const { error } = await supabase
+          .from('allowance_settings')
+          .insert({
+            user_id: userData.profile.id,
+            domestic_daily_rate: userProfile.allowances.domestic,
+            overseas_daily_rate: userProfile.allowances.overseas,
+            transportation_rate: userProfile.allowances.transportation,
+            accommodation_rate: userProfile.allowances.accommodation
+          });
+
+        if (error) {
+          alert('日当設定の作成に失敗しました: ' + error.message);
+          return;
+        }
+      }
+
+      alert('日当設定が保存されました');
+    } catch (err) {
+      alert('日当設定の保存に失敗しました');
+      console.error('Allowance settings save error:', err);
+    }
   };
+
 
   const handleNotificationSave = () => {
     localStorage.setItem('notificationSettings', JSON.stringify(notificationSettings));
     alert('通知設定が更新されました');
   };
 
-  const handlePlanChange = (newPlan: string) => {
-    const updatedProfile = { ...userProfile, currentPlan: newPlan };
-    setUserProfile(updatedProfile);
-    localStorage.setItem('userProfile', JSON.stringify(updatedProfile));
-    alert(`プランが${newPlan}に変更されました`);
-  };
 
   const tabs = [
     { id: 'profile', label: 'プロフィール', icon: User },
@@ -119,12 +211,14 @@ function MyPage({ onNavigate }: MyPageProps) {
             onChange={(e) => setUserProfile(prev => ({ ...prev, position: e.target.value }))}
             className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
           >
+            <option value="">選択してください</option>
             <option value="代表取締役">代表取締役</option>
             <option value="取締役">取締役</option>
             <option value="部長">部長</option>
             <option value="課長">課長</option>
             <option value="主任">主任</option>
-            <option value="一般職">一般職</option>
+            <option value="一般社員">一般社員</option>
+            <option value="アルバイト">アルバイト</option>
           </select>
         </div>
         <div>
@@ -177,7 +271,6 @@ function MyPage({ onNavigate }: MyPageProps) {
             <span>パスワード変更</span>
           </button>
         </div>
-
       </div>
 
       <div className="flex justify-end">
@@ -281,11 +374,11 @@ function MyPage({ onNavigate }: MyPageProps) {
 
       <div className="flex justify-end">
         <button
-          onClick={handleProfileSave}
+          onClick={handleAllowancesSave}
           className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105"
         >
           <Save className="w-5 h-5" />
-          <span>保存</span>
+          <span>日当設定を保存</span>
         </button>
       </div>
     </div>
@@ -370,7 +463,7 @@ function MyPage({ onNavigate }: MyPageProps) {
           className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105"
         >
           <Save className="w-5 h-5" />
-          <span>保存</span>
+          <span>通知設定を保存</span>
         </button>
       </div>
     </div>
@@ -378,189 +471,82 @@ function MyPage({ onNavigate }: MyPageProps) {
 
   const renderAccountingTab = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <h3 className="text-2xl font-bold text-slate-800 mb-2">会計ソフト設定</h3>
-        <p className="text-slate-600">会計ソフト連携機能は現在開発中です</p>
-      </div>
-
-      <div className="text-center">
-        <div className="bg-slate-100 rounded-lg p-8">
-          <Link className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-          <p className="text-slate-500">この機能は今後のアップデートで提供予定です</p>
+      <div className="bg-white/30 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4">会計ソフト連携</h3>
+        <p className="text-slate-600 mb-6">
+          現在、会計ソフトとの連携機能は開発中です。今後、以下のソフトウェアとの連携を予定しています。
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex items-center space-x-3 p-3 bg-white/20 rounded-lg">
+            <Link className="w-5 h-5 text-navy-600" />
+            <span className="font-medium text-slate-800">freee</span>
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-white/20 rounded-lg">
+            <Link className="w-5 h-5 text-navy-600" />
+            <span className="font-medium text-slate-800">弥生会計</span>
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-white/20 rounded-lg">
+            <Link className="w-5 h-5 text-navy-600" />
+            <span className="font-medium text-slate-800">勘定奉行</span>
+          </div>
+          <div className="flex items-center space-x-3 p-3 bg-white/20 rounded-lg">
+            <Link className="w-5 h-5 text-navy-600" />
+            <span className="font-medium text-slate-800">MFクラウド</span>
+          </div>
         </div>
-      </div>
-
-      <div className="bg-blue-50/50 rounded-lg p-6">
-        <h4 className="text-lg font-semibold text-slate-800 mb-3">会計ソフト連携のメリット</h4>
-        <ul className="space-y-2 text-sm text-slate-700">
-          <li className="flex items-start space-x-2">
-            <span className="text-blue-600 mt-1">•</span>
-            <span>出張費の仕訳が自動で作成されます</span>
-          </li>
-          <li className="flex items-start space-x-2">
-            <span className="text-blue-600 mt-1">•</span>
-            <span>手動での入力作業が不要になります</span>
-          </li>
-          <li className="flex items-start space-x-2">
-            <span className="text-blue-600 mt-1">•</span>
-            <span>経理業務の効率化が図れます</span>
-          </li>
-          <li className="flex items-start space-x-2">
-            <span className="text-blue-600 mt-1">•</span>
-            <span>入力ミスを防ぐことができます</span>
-          </li>
-        </ul>
       </div>
     </div>
   );
 
   const renderUsersTab = () => (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-slate-800">ユーザー管理</h3>
-        <button className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-navy-600 to-navy-800 text-white rounded-lg font-medium hover:from-navy-700 hover:to-navy-900 transition-all duration-200">
-          <Users className="w-4 h-4" />
-          <span>ユーザー招待</span>
-        </button>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-white/30 border-b border-white/30">
-            <tr>
-              <th className="text-left py-3 px-4 font-medium text-slate-700">氏名</th>
-              <th className="text-left py-3 px-4 font-medium text-slate-700">メール</th>
-              <th className="text-left py-3 px-4 font-medium text-slate-700">役割</th>
-              <th className="text-left py-3 px-4 font-medium text-slate-700">ステータス</th>
-              <th className="text-center py-3 px-4 font-medium text-slate-700">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-white/20">
-              <td className="py-3 px-4 text-slate-800">山田太郎</td>
-              <td className="py-3 px-4 text-slate-700">yamada@example.com</td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-red-700 bg-red-100">管理者</span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-emerald-700 bg-emerald-100">アクティブ</span>
-              </td>
-              <td className="py-3 px-4 text-center">
-                <button className="text-slate-600 hover:text-slate-800">編集</button>
-              </td>
-            </tr>
-            <tr className="border-b border-white/20">
-              <td className="py-3 px-4 text-slate-800">佐藤花子</td>
-              <td className="py-3 px-4 text-slate-700">sato@example.com</td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-blue-700 bg-blue-100">承認者</span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-emerald-700 bg-emerald-100">アクティブ</span>
-              </td>
-              <td className="py-3 px-4 text-center">
-                <button className="text-slate-600 hover:text-slate-800">編集</button>
-              </td>
-            </tr>
-            <tr className="border-b border-white/20">
-              <td className="py-3 px-4 text-slate-800">田中次郎</td>
-              <td className="py-3 px-4 text-slate-700">tanaka@example.com</td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-slate-700 bg-slate-100">一般</span>
-              </td>
-              <td className="py-3 px-4">
-                <span className="px-2 py-1 rounded-full text-xs font-medium text-amber-700 bg-amber-100">招待中</span>
-              </td>
-              <td className="py-3 px-4 text-center">
-                <button className="text-slate-600 hover:text-slate-800">編集</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div className="bg-white/30 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4">ユーザー管理</h3>
+        <p className="text-slate-600 mb-6">
+          現在、ユーザー管理機能は開発中です。管理者権限を持つユーザーのみが利用できます。
+        </p>
+        <div className="flex items-center space-x-2 text-slate-500">
+          <Users className="w-5 h-5" />
+          <span>管理者権限が必要です</span>
+        </div>
       </div>
     </div>
   );
 
   const renderPlanTab = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <h3 className="text-2xl font-bold text-slate-800 mb-2">現在のプラン</h3>
-        <div className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-800 text-white rounded-full font-medium">
-          <CreditCard className="w-5 h-5 mr-2" />
-          Pro プラン
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="backdrop-blur-xl bg-white/30 rounded-xl p-6 border border-white/30">
-          <h4 className="text-lg font-semibold text-slate-800 mb-4">Free</h4>
-          <div className="text-3xl font-bold text-slate-800 mb-2">¥0<span className="text-sm font-normal">/月</span></div>
-          <p className="text-sm text-slate-600 mb-4">ユーザー上限：1名まで</p>
-          <ul className="space-y-2 text-sm text-slate-600 mb-6">
-            <li>• 出張旅費規程の自動生成</li>
-            <li>• 節税シミュレーション</li>
-          </ul>
-          <button className="w-full py-2 px-4 bg-slate-200 text-slate-600 rounded-lg cursor-not-allowed">
-            無料プラン
-          </button>
-        </div>
-
-        <div className="backdrop-blur-xl bg-gradient-to-br from-navy-600/20 to-navy-800/20 rounded-xl p-6 border-2 border-navy-600/50 relative">
-          <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-            <span className="bg-gradient-to-r from-navy-600 to-navy-800 text-white px-4 py-1 rounded-full text-xs font-medium">
-              現在のプラン
-            </span>
-          </div>
-          <h4 className="text-lg font-semibold text-slate-800 mb-4">Pro</h4>
-          <div className="text-3xl font-bold text-slate-800 mb-2">¥9,800<span className="text-sm font-normal">/月</span></div>
-          <p className="text-sm text-slate-600 mb-4">ユーザー上限：3名まで</p>
-          <ul className="space-y-2 text-sm text-slate-600 mb-6">
-            <li>• 全機能利用可能</li>
-            <li>• ワンタイム承認</li>
-            <li>• IPFS保存（証憑の改ざん防止）</li>
-            <li>• API連携</li>
-          </ul>
-          <button className="w-full py-2 px-4 bg-gradient-to-r from-navy-600 to-navy-800 text-white rounded-lg">
-            現在のプラン
-          </button>
-        </div>
-
-        <div className="backdrop-blur-xl bg-white/30 rounded-xl p-6 border border-white/30">
-          <h4 className="text-lg font-semibold text-slate-800 mb-4">Enterprise</h4>
-          <div className="text-3xl font-bold text-slate-800 mb-2">¥15,800<span className="text-sm font-normal">/月</span></div>
-          <p className="text-sm text-slate-600 mb-4">ユーザー上限：無制限</p>
-          <ul className="space-y-2 text-sm text-slate-600 mb-6">
-            <li>• Pro機能すべて</li>
-            <li>• 組織細分化（部署・拠点ごとの管理）</li>
-            <li>• 第二管理者設定</li>
-            <li>• 承認フロー自由設定</li>
-          </ul>
-          <button className="w-full py-2 px-4 bg-gradient-to-r from-emerald-600 to-emerald-800 text-white rounded-lg hover:from-emerald-700 hover:to-emerald-900 transition-all duration-200">
-            アップグレード
-          </button>
-        </div>
-      </div>
-
       <div className="bg-white/30 rounded-lg p-6">
-        <h4 className="text-lg font-semibold text-slate-800 mb-4">請求履歴</h4>
-        <div className="space-y-3">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4">現在のプラン</h3>
+        <div className="flex items-center justify-between p-4 bg-white/20 rounded-lg mb-6">
+          <div>
+            <p className="font-medium text-slate-800">Standard</p>
+            <p className="text-sm text-slate-600">基本機能付きプラン</p>
+          </div>
+          <div className="text-right">
+            <p className="font-medium text-slate-800">¥4,900</p>
+            <p className="text-sm text-slate-600">月額</p>
+          </div>
+        </div>
+
+        <h4 className="text-md font-semibold text-slate-800 mb-3">利用履歴</h4>
+        <div className="space-y-2">
           <div className="flex items-center justify-between py-2 border-b border-white/20">
             <div>
               <p className="font-medium text-slate-800">2024年7月分</p>
-              <p className="text-sm text-slate-600">Pro プラン</p>
+              <p className="text-sm text-slate-600">Standard プラン</p>
             </div>
             <div className="text-right">
-              <p className="font-medium text-slate-800">¥9,800</p>
+              <p className="font-medium text-slate-800">¥4,900</p>
               <button className="text-sm text-navy-600 hover:text-navy-800">領収書DL</button>
             </div>
           </div>
           <div className="flex items-center justify-between py-2 border-b border-white/20">
             <div>
               <p className="font-medium text-slate-800">2024年6月分</p>
-              <p className="text-sm text-slate-600">Pro プラン</p>
+              <p className="text-sm text-slate-600">Standard プラン</p>
             </div>
             <div className="text-right">
-              <p className="font-medium text-slate-800">¥9,800</p>
+              <p className="font-medium text-slate-800">¥4,900</p>
               <button className="text-sm text-navy-600 hover:text-navy-800">領収書DL</button>
             </div>
           </div>

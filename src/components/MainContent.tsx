@@ -3,6 +3,7 @@ import StatsCards from './StatsCards';
 import QuickActions from './QuickActions';
 import RecentApplications from './RecentApplications';
 import ActivityFeed from './ActivityFeed';
+import { useUserData } from '../hooks/useUserData';
 
 interface MainContentProps {
   onNavigate: (view: string) => void;
@@ -10,20 +11,29 @@ interface MainContentProps {
 }
 
 function MainContent({ onNavigate, onShowDetail }: MainContentProps) {
-  // ユーザーの役割を取得（実際の実装では、ユーザー情報から取得）
+  const { userData, loading } = useUserData();
+
+  // ユーザーの役割を取得
   const getUserRole = () => {
-    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    return userProfile.role || 'user'; // デフォルトは一般ユーザー
+    return userData.profile?.role || 'user';
   };
 
   const userRole = getUserRole();
-  const isAdmin = userRole === 'admin' || userRole === '管理者';
+  const isAdmin = userRole === 'admin' || userRole === 'manager';
 
   return (
     <div className="flex-1 overflow-auto p-4 lg:p-6">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-6 lg:mb-8">
-          <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">ダッシュボード</h1>
+          <div>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">ダッシュボード</h1>
+            {userData.profile && (
+              <p className="text-slate-600 mt-1">
+                ようこそ、{userData.profile.full_name}さん
+                {userData.profile.company && ` (${userData.profile.company})`}
+              </p>
+            )}
+          </div>
           {isAdmin && (
             <button
               onClick={() => onNavigate('admin-dashboard')}

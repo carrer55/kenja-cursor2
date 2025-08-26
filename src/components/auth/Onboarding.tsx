@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { User, Building, Phone, Briefcase, CheckCircle } from 'lucide-react';
+import { User, Building, Phone, Briefcase, CheckCircle, Users } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { supabase } from '../../lib/supabase';
 
 interface OnboardingProps {
   onNavigate: (view: string) => void;
@@ -13,31 +14,57 @@ function Onboarding({ onNavigate, onComplete }: OnboardingProps) {
     companyName: '',
     position: '',
     phone: '',
+    department: '',
     agreeToTerms: false
   });
   const [error, setError] = useState('');
-  const { updateProfile, loading } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     if (!formData.agreeToTerms) {
       setError('利用規約とプライバシーポリシーに同意してください');
+      setLoading(false);
       return;
     }
 
-    const result = await updateProfile({
-      name: formData.fullName,
-      company: formData.companyName,
-      position: formData.position,
-      phone: formData.phone
-    });
+    if (!user) {
+      setError('ユーザー情報が取得できません');
+      setLoading(false);
+      return;
+    }
 
-    if (result.success) {
+    try {
+      // Supabaseのprofilesテーブルを直接更新
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: formData.fullName,
+          company: formData.companyName,
+          position: formData.position,
+          phone: formData.phone,
+          department: formData.department,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        setError('プロフィールの更新に失敗しました: ' + updateError.message);
+        setLoading(false);
+        return;
+      }
+
+      // 成功時の処理
+      setLoading(false);
       onComplete();
-    } else {
-      setError(result.error || '更新に失敗しました');
+    } catch (err) {
+      setError('プロフィールの更新に失敗しました');
+      console.error('Profile update error:', err);
+      setLoading(false);
     }
   };
 
@@ -76,7 +103,7 @@ function Onboarding({ onNavigate, onComplete }: OnboardingProps) {
                   value={formData.fullName}
                   onChange={(e) => setFormData(prev => ({ ...prev, fullName: e.target.value }))}
                   className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
-                  placeholder="山田太郎"
+                  placeholder="田中 心也"
                   required
                 />
               </div>
@@ -84,7 +111,7 @@ function Onboarding({ onNavigate, onComplete }: OnboardingProps) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   <Building className="w-4 h-4 inline mr-1" />
-                  法人名 <span className="text-red-500">*</span>
+                  会社名 <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -116,6 +143,21 @@ function Onboarding({ onNavigate, onComplete }: OnboardingProps) {
                   <option value="一般職">一般職</option>
                   <option value="その他">その他</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <Users className="w-4 h-4 inline mr-1" />
+                  部署 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.department}
+                  onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+                  className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
+                  placeholder="経営企画部"
+                  required
+                />
               </div>
 
               <div>

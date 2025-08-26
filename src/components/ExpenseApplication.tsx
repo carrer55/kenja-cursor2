@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
-import { Save, Upload, Camera, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Save, Upload, Camera, FileText, Loader2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useAuth } from '../hooks/useAuth';
+import { expenseService } from '../lib/database';
+import type { Tables } from '../types/supabase';
 
 interface ExpenseApplicationProps {
   onNavigate: (view: 'dashboard' | 'business-trip' | 'expense') => void;
@@ -22,6 +25,7 @@ interface ExpenseItem {
 }
 
 function ExpenseApplication({ onNavigate }: ExpenseApplicationProps) {
+  const { user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([
     {
@@ -40,6 +44,8 @@ function ExpenseApplication({ onNavigate }: ExpenseApplicationProps) {
     date: '',
     amount: 0
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string>('');
 
   const categories = ['交通費', '宿泊費', '日当', '雑費'];
 
@@ -87,11 +93,48 @@ function ExpenseApplication({ onNavigate }: ExpenseApplicationProps) {
     setShowOCRModal(false);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('経費申請データ:', expenses);
-    alert('経費申請が送信されました！');
-    onNavigate('dashboard');
+    if (!user) {
+      setSubmitError('ユーザー情報が取得できません');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError('');
+
+    try {
+      // 各経費項目をデータベースに保存
+      for (const expense of expenses) {
+        if (expense.amount > 0 && expense.date && expense.category) {
+          const expenseData: Tables<'expense_applications'> = {
+            user_id: user.id,
+            title: `${expense.category} - ${expense.description || '経費申請'}`,
+            description: expense.description,
+            amount: expense.amount,
+            currency: 'JPY',
+            status: 'pending',
+            category: expense.category,
+            receipt_url: null, // 後でファイルアップロード機能を実装
+            submitted_at: new Date().toISOString(),
+            approved_at: null,
+            approved_by: null
+          };
+
+          const result = await expenseService.createExpenseApplication(expenseData);
+          if (result.error) {
+            throw new Error(result.error);
+          }
+        }
+      }
+
+      alert('経費申請が正常に送信されました！');
+      onNavigate('dashboard');
+    } catch (error: any) {
+      setSubmitError(error.message || '経費申請の送信に失敗しました');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const onBack = () => {
@@ -273,21 +316,34 @@ function ExpenseApplication({ onNavigate }: ExpenseApplicationProps) {
                   </div>
                 </div>
 
+                {/* エラーメッセージ */}
+                {submitError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">{submitError}</p>
+                  </div>
+                )}
+
                 {/* 送信ボタン */}
                 <div className="flex justify-end space-x-4">
                   <button
                     type="button"
                     onClick={onBack}
-                    className="px-6 py-3 bg-white/50 hover:bg-white/70 text-slate-700 rounded-lg font-medium transition-colors backdrop-blur-sm"
+                    disabled={isSubmitting}
+                    className="px-6 py-3 bg-white/50 hover:bg-white/70 text-slate-700 rounded-lg font-medium transition-colors backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     キャンセル
                   </button>
                   <button
                     type="submit"
-                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105"
+                    disabled={isSubmitting}
+                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Save className="w-5 h-5" />
-                    <span>申請を送信</span>
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Save className="w-5 h-5" />
+                    )}
+                    <span>{isSubmitting ? '送信中...' : '申請を送信'}</span>
                   </button>
                 </div>
               </form>

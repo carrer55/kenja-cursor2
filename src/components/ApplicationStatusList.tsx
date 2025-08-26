@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Search, Filter, Eye, Edit, Trash2, Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Search, Filter, Eye, Edit, Trash2, Clock, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useAuth } from '../hooks/useAuth';
+import { expenseService, businessTripService } from '../lib/database';
+import type { Tables } from '../types/supabase';
 
 interface ApplicationStatusListProps {
   onNavigate: (view: string) => void;
@@ -14,68 +17,81 @@ interface Application {
   title: string;
   amount: number;
   submittedDate: string;
-  status: 'draft' | 'pending' | 'returned' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   approver: string;
   lastUpdated: string;
 }
 
 function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusListProps) {
+  const { user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>('');
 
-  const [applications] = useState<Application[]>([
-    {
-      id: 'BT-2024-001',
-      type: 'business-trip',
-      title: '東京出張申請',
-      amount: 52500,
-      submittedDate: '2024-07-20',
-      status: 'approved',
-      approver: '佐藤部長',
-      lastUpdated: '2024-07-21T16:00:00Z'
-    },
-    {
-      id: 'EX-2024-001',
-      type: 'expense',
-      title: '交通費・宿泊費精算',
-      amount: 12800,
-      submittedDate: '2024-07-18',
-      status: 'pending',
-      approver: '田中部長',
-      lastUpdated: '2024-07-19T09:00:00Z'
-    },
-    {
-      id: 'BT-2024-002',
-      type: 'business-trip',
-      title: '大阪出張申請',
-      amount: 35000,
-      submittedDate: '2024-07-15',
-      status: 'returned',
-      approver: '山田経理',
-      lastUpdated: '2024-07-16T14:30:00Z'
-    },
-    {
-      id: 'EX-2024-002',
-      type: 'expense',
-      title: '会議費精算',
-      amount: 8500,
-      submittedDate: '2024-07-10',
-      status: 'draft',
-      approver: '',
-      lastUpdated: '2024-07-10T11:00:00Z'
-    },
-    {
-      id: 'BT-2024-003',
-      type: 'business-trip',
-      title: '福岡出張申請',
-      amount: 45000,
-      submittedDate: '2024-07-05',
-      status: 'rejected',
-      approver: '鈴木取締役',
-      lastUpdated: '2024-07-06T10:15:00Z'
-    }
-  ]);
+  // データベースから申請データを取得
+  useEffect(() => {
+    const fetchApplications = async () => {
+      if (!user) return;
+
+      try {
+        setLoading(true);
+        setError('');
+
+        // 経費申請と出張申請を並行して取得
+        const [expenseResult, businessTripResult] = await Promise.all([
+          expenseService.getExpenseApplications(user.id),
+          businessTripService.getBusinessTripApplications(user.id)
+        ]);
+
+        if (expenseResult.error) {
+          throw new Error(expenseResult.error);
+        }
+
+        if (businessTripResult.error) {
+          throw new Error(businessTripResult.error);
+        }
+
+        // データを統合してApplication形式に変換
+        const expenseApps: Application[] = (expenseResult.data || []).map(expense => ({
+          id: expense.id,
+          type: 'expense' as const,
+          title: expense.title,
+          amount: expense.amount,
+          submittedDate: expense.submitted_at,
+          status: expense.status,
+          approver: expense.approved_by || '',
+          lastUpdated: expense.updated_at
+        }));
+
+        const businessTripApps: Application[] = (businessTripResult.data || []).map(trip => ({
+          id: trip.id,
+          type: 'business-trip' as const,
+          title: trip.title,
+          amount: trip.estimated_cost,
+          submittedDate: trip.submitted_at,
+          status: trip.status,
+          approver: trip.approved_by || '',
+          lastUpdated: trip.updated_at
+        }));
+
+        // 日付順にソート
+        const allApps = [...expenseApps, ...businessTripApps].sort((a, b) => 
+          new Date(b.submittedDate).getTime() - new Date(a.submittedDate).getTime()
+        );
+
+        setApplications(allApps);
+      } catch (error: any) {
+        setError(error.message || '申請データの取得に失敗しました');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchApplications();
+  }, [user]);
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);
@@ -87,12 +103,10 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
         return <CheckCircle className="w-4 h-4 text-emerald-600" />;
       case 'pending':
         return <Clock className="w-4 h-4 text-amber-600" />;
-      case 'returned':
-        return <AlertTriangle className="w-4 h-4 text-orange-600" />;
+      case 'cancelled':
+        return <XCircle className="w-4 h-4 text-slate-500" />;
       case 'rejected':
         return <XCircle className="w-4 h-4 text-red-600" />;
-      case 'draft':
-        return <Edit className="w-4 h-4 text-slate-500" />;
       default:
         return <Clock className="w-4 h-4 text-slate-400" />;
     }
@@ -100,22 +114,20 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
 
   const getStatusLabel = (status: string) => {
     const labels = {
-      'draft': '下書き',
       'pending': '承認待ち',
-      'returned': '差戻し',
       'approved': '承認',
-      'rejected': '否認'
+      'rejected': '否認',
+      'cancelled': 'キャンセル'
     };
     return labels[status as keyof typeof labels] || status;
   };
 
   const getStatusColor = (status: string) => {
     const colors = {
-      'draft': 'text-slate-700 bg-slate-100',
       'pending': 'text-amber-700 bg-amber-100',
-      'returned': 'text-orange-700 bg-orange-100',
       'approved': 'text-emerald-700 bg-emerald-100',
-      'rejected': 'text-red-700 bg-red-100'
+      'rejected': 'text-red-700 bg-red-100',
+      'cancelled': 'text-slate-700 bg-slate-100'
     };
     return colors[status as keyof typeof colors] || 'text-slate-700 bg-slate-100';
   };
@@ -132,9 +144,7 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
   });
 
   const handleStatusClick = (app: Application) => {
-    if (app.status !== 'draft') {
-      onShowDetail(app.type, app.id);
-    }
+    onShowDetail(app.type, app.id);
   };
 
   return (
@@ -197,97 +207,95 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
                       className="px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
                     >
                       <option value="all">すべてのステータス</option>
-                      <option value="draft">下書き</option>
                       <option value="pending">承認待ち</option>
-                      <option value="returned">差戻し</option>
                       <option value="approved">承認</option>
                       <option value="rejected">否認</option>
+                      <option value="cancelled">キャンセル</option>
                     </select>
                   </div>
                 </div>
               </div>
 
+              {/* ローディング状態 */}
+              {loading && (
+                <div className="backdrop-blur-xl bg-white/20 rounded-xl border border-white/30 shadow-xl p-12">
+                  <div className="flex items-center justify-center space-x-3">
+                    <Loader2 className="w-6 h-6 animate-spin text-navy-600" />
+                    <span className="text-slate-700">申請データを読み込み中...</span>
+                  </div>
+                </div>
+              )}
+
+              {/* エラーメッセージ */}
+              {error && (
+                <div className="backdrop-blur-xl bg-red-50/20 rounded-xl border border-red-200/30 shadow-xl p-6">
+                  <p className="text-red-700 text-center">{error}</p>
+                </div>
+              )}
+
               {/* 申請一覧 */}
-              <div className="backdrop-blur-xl bg-white/20 rounded-xl border border-white/30 shadow-xl overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-white/30 border-b border-white/30">
-                      <tr>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">申請ID</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">種別</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">タイトル</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">金額</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">申請日</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">承認者</th>
-                        <th className="text-left py-4 px-6 font-medium text-slate-700">ステータス</th>
-                        <th className="text-center py-4 px-6 font-medium text-slate-700">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredApplications.length === 0 ? (
+              {!loading && !error && (
+                <div className="backdrop-blur-xl bg-white/20 rounded-xl border border-white/30 shadow-xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-white/30 border-b border-white/30">
                         <tr>
-                          <td colSpan={8} className="text-center py-12 text-slate-500">
-                            {searchTerm || statusFilter !== 'all' ? '条件に一致する申請が見つかりません' : '申請がありません'}
-                          </td>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">申請ID</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">種別</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">タイトル</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">金額</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">申請日</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">承認者</th>
+                          <th className="text-left py-4 px-6 font-medium text-slate-700">ステータス</th>
+                          <th className="text-center py-4 px-6 font-medium text-slate-700">操作</th>
                         </tr>
-                      ) : (
-                        filteredApplications.map((app) => (
-                          <tr key={app.id} className="border-b border-white/20 hover:bg-white/20 transition-colors">
-                            <td className="py-4 px-6 text-slate-800 font-medium">{app.id}</td>
-                            <td className="py-4 px-6 text-slate-700">{getTypeLabel(app.type)}</td>
-                            <td className="py-4 px-6 text-slate-800">{app.title}</td>
-                            <td className="py-4 px-6 text-slate-800 font-medium">¥{app.amount.toLocaleString()}</td>
-                            <td className="py-4 px-6 text-slate-600 text-sm">
-                              {new Date(app.submittedDate).toLocaleDateString('ja-JP')}
-                            </td>
-                            <td className="py-4 px-6 text-slate-700">{app.approver || '未設定'}</td>
-                            <td className="py-4 px-6">
-                              <button
-                                onClick={() => handleStatusClick(app)}
-                                className={`flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                                  app.status === 'draft' 
-                                    ? getStatusColor(app.status) + ' cursor-default'
-                                    : getStatusColor(app.status) + ' hover:opacity-80 cursor-pointer'
-                                }`}
-                              >
-                                {getStatusIcon(app.status)}
-                                <span>{getStatusLabel(app.status)}</span>
-                              </button>
-                            </td>
-                            <td className="py-4 px-6">
-                              <div className="flex items-center justify-center space-x-2">
-                                <button
-                                  onClick={() => onShowDetail(app.type, app.id)}
-                                  className="p-2 text-slate-600 hover:text-slate-800 hover:bg-white/30 rounded-lg transition-colors"
-                                  title="詳細表示"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                                {app.status === 'draft' && (
-                                  <button
-                                    className="p-2 text-slate-600 hover:text-slate-800 hover:bg-white/30 rounded-lg transition-colors"
-                                    title="編集"
-                                  >
-                                    <Edit className="w-4 h-4" />
-                                  </button>
-                                )}
-                                {(app.status === 'draft' || app.status === 'returned') && (
-                                  <button
-                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50/30 rounded-lg transition-colors"
-                                    title="削除"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
+                      </thead>
+                      <tbody>
+                        {filteredApplications.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="text-center py-12 text-slate-500">
+                              {searchTerm || statusFilter !== 'all' ? '条件に一致する申請が見つかりません' : '申請がありません'}
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        ) : (
+                          filteredApplications.map((app) => (
+                            <tr key={app.id} className="border-b border-white/20 hover:bg-white/20 transition-colors">
+                              <td className="py-4 px-6 text-slate-800 font-medium">{app.id}</td>
+                              <td className="py-4 px-6 text-slate-700">{getTypeLabel(app.type)}</td>
+                              <td className="py-4 px-6 text-slate-800">{app.title}</td>
+                              <td className="py-4 px-6 text-slate-800 font-medium">¥{app.amount.toLocaleString()}</td>
+                              <td className="py-4 px-6 text-slate-600 text-sm">
+                                {new Date(app.submittedDate).toLocaleDateString('ja-JP')}
+                              </td>
+                              <td className="py-4 px-6 text-slate-700">{app.approver || '未設定'}</td>
+                              <td className="py-4 px-6">
+                                <button
+                                  onClick={() => handleStatusClick(app)}
+                                  className={`flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-medium transition-colors ${getStatusColor(app.status)} hover:opacity-80 cursor-pointer`}
+                                >
+                                  {getStatusIcon(app.status)}
+                                  <span>{getStatusLabel(app.status)}</span>
+                                </button>
+                              </td>
+                              <td className="py-4 px-6">
+                                <div className="flex items-center justify-center space-x-2">
+                                  <button
+                                    onClick={() => onShowDetail(app.type, app.id)}
+                                    className="p-2 text-slate-600 hover:text-slate-800 hover:bg-white/30 rounded-lg transition-colors"
+                                    title="詳細表示"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, UserPlus, ArrowLeft, User, Building, Phone, Briefcase } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, UserPlus, ArrowLeft, User, Building, Phone, Briefcase, Users } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 interface RegisterProps {
@@ -14,7 +14,8 @@ function Register({ onNavigate }: RegisterProps) {
     name: '',
     company: '',
     position: '',
-    phone: ''
+    phone: '',
+    department: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -42,7 +43,8 @@ function Register({ onNavigate }: RegisterProps) {
       name: formData.name,
       company: formData.company,
       position: formData.position,
-      phone: formData.phone
+      phone: formData.phone,
+      department: formData.department
     });
 
     if (result.success) {
@@ -130,6 +132,21 @@ function Register({ onNavigate }: RegisterProps) {
                   <option value="一般職">一般職</option>
                   <option value="その他">その他</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  <Users className="w-4 h-4 inline mr-1" />
+                  部署 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.department}
+                  onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+                  className="w-full px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 backdrop-blur-xl"
+                  placeholder="営業部"
+                  required
+                />
               </div>
 
               <div>

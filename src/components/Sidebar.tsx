@@ -8,19 +8,12 @@ import {
   Settings, 
   LogOut,
   User,
-  X
+  X,
+  Shield,
+  Users
 } from 'lucide-react';
-import { auth } from '../lib/auth';
-
-const menuItems = [
-  { icon: Home, label: 'ホーム', active: true },
-  { icon: Plane, label: '出張申請', active: false },
-  { icon: Receipt, label: '経費申請', active: false },
-  { icon: FolderOpen, label: '書類管理', active: false },
-  { icon: Calculator, label: '節税シミュレーション', active: false },
-  { icon: Settings, label: '出張規定管理', active: false },
-  { icon: User, label: 'マイページ（設定）', active: false },
-];
+import { useUserData } from '../hooks/useUserData';
+import { useAuth } from '../hooks/useAuth';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -30,6 +23,30 @@ interface SidebarProps {
 }
 
 function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: SidebarProps) {
+  const { userData } = useUserData();
+  const { logout } = useAuth();
+
+  // ユーザーの役割に基づいてメニュー項目を生成
+  const getMenuItems = () => {
+    const baseItems = [
+      { icon: Home, label: 'ホーム', view: 'dashboard', show: true },
+      { icon: Plane, label: '出張申請', view: 'business-trip', show: true },
+      { icon: Receipt, label: '経費申請', view: 'expense', show: true },
+      { icon: FolderOpen, label: '書類管理', view: 'document-management', show: true },
+      { icon: Calculator, label: '節税シミュレーション', view: 'tax-simulation', show: true },
+      { icon: Settings, label: '出張規定管理', view: 'travel-regulation-management', show: true },
+      { icon: User, label: 'マイページ（設定）', view: 'my-page', show: true },
+    ];
+
+    // 管理者・マネージャーのみ表示する項目
+    const adminItems = [
+      { icon: Shield, label: '管理者ダッシュボード', view: 'admin-dashboard', show: userData.profile?.role === 'admin' },
+      { icon: Users, label: 'ユーザー管理', view: 'user-management', show: userData.profile?.role === 'admin' || userData.profile?.role === 'manager' },
+    ];
+
+    return [...baseItems, ...adminItems].filter(item => item.show);
+  };
+
   const handleMenuClick = (view: string) => {
     if (onNavigate) {
       onNavigate(view);
@@ -39,6 +56,13 @@ function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: Sid
       onClose();
     }
   };
+
+  const handleLogout = async () => {
+    await logout();
+    // ログアウト後の処理はAuthWrapperで自動的に処理される
+  };
+
+  const menuItems = getMenuItems();
 
   return (
     <div className={`
@@ -66,49 +90,50 @@ function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: Sid
             <X className="w-5 h-5" />
           </button>
         </div>
+        
+        {/* ユーザー情報表示 */}
+        {userData.profile && (
+          <div className="mt-4 p-3 bg-white/20 rounded-lg border border-white/30 relative z-10">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-navy-600 to-navy-800 rounded-full flex items-center justify-center">
+                <span className="text-white text-sm font-bold">
+                  {userData.profile.full_name?.charAt(0) || 'U'}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 truncate">
+                  {userData.profile.full_name || 'ユーザー'}
+                </p>
+                <p className="text-xs text-slate-600 truncate">
+                  {userData.profile.role === 'admin' ? '管理者' : 
+                   userData.profile.role === 'manager' ? 'マネージャー' : '一般ユーザー'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 px-4 relative z-10 overflow-y-auto">
         <ul className="space-y-2">
           {menuItems.map((item, index) => {
             const Icon = item.icon;
-            let clickHandler = () => handleMenuClick('dashboard');
-            let isActive = false;
-            
-            if (item.label === '出張申請') {
-              clickHandler = () => handleMenuClick('business-trip');
-              isActive = currentView === 'business-trip';
-            } else if (item.label === '経費申請') {
-              clickHandler = () => handleMenuClick('expense');
-              isActive = currentView === 'expense';
-            } else if (item.label === '書類管理') {
-              clickHandler = () => handleMenuClick('document-management');
-              isActive = currentView === 'document-management';
-            } else if (item.label === '節税シミュレーション') {
-              clickHandler = () => handleMenuClick('tax-simulation');
-              isActive = currentView === 'tax-simulation';
-            } else if (item.label === '出張規定管理') {
-              clickHandler = () => handleMenuClick('travel-regulation-management');
-              isActive = currentView === 'travel-regulation-management' || currentView === 'travel-regulation-creation' || currentView === 'travel-regulation-history';
-            } else if (item.label === 'マイページ（設定）') {
-              clickHandler = () => handleMenuClick('my-page');
-              isActive = currentView === 'my-page';
-            } else if (item.label === 'ホーム') {
-              isActive = currentView === 'dashboard';
-            }
+            const isActive = currentView === item.view;
             
             return (
               <li key={index}>
                 <button
-                  onClick={clickHandler}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 ${
-                    isActive
-                      ? 'bg-gradient-to-r from-navy-700 to-navy-900 text-white shadow-xl backdrop-blur-sm border border-navy-600/50'
-                      : 'text-slate-700 hover:text-slate-900 hover:bg-white/30 hover:backdrop-blur-sm hover:shadow-lg'
-                  }`}
+                  onClick={() => handleMenuClick(item.view)}
+                  className={`
+                    w-full flex items-center space-x-3 px-3 py-3 rounded-lg text-left transition-all duration-200 group
+                    ${isActive 
+                      ? 'bg-gradient-to-r from-navy-600 to-navy-800 text-white shadow-lg' 
+                      : 'text-slate-700 hover:bg-white/30 hover:text-slate-900'
+                    }
+                  `}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span className="text-sm font-medium truncate">{item.label}</span>
+                  <Icon className={`w-5 h-5 flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-600 group-hover:text-slate-800'}`} />
+                  <span className="font-medium">{item.label}</span>
                 </button>
               </li>
             );
@@ -116,53 +141,18 @@ function Sidebar({ isOpen, onClose, onNavigate, currentView = 'dashboard' }: Sid
         </ul>
       </nav>
 
-      {/* User Card */}
-      <div className="p-4 relative z-10 flex-shrink-0">
-        <div className="backdrop-blur-xl bg-white/20 rounded-lg p-4 border border-white/30 shadow-xl">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-navy-600 to-navy-800 rounded-full flex items-center justify-center shadow-lg">
-              <User className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className="text-slate-800 text-sm font-medium" id="sidebar-user-name">
-                {(() => {
-                  const demoMode = localStorage.getItem('demoMode');
-                  if (demoMode === 'true') {
-                    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-                    return userProfile.full_name || 'デモユーザー';
-                  }
-                  // 実際のユーザーの場合はローカルストレージから取得
-                  const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-                  return userProfile.full_name || 'ユーザー';
-                })()}
-              </p>
-              <p className="text-slate-600 text-xs" id="sidebar-user-position">
-                {(() => {
-                  const demoMode = localStorage.getItem('demoMode');
-                  if (demoMode === 'true') {
-                    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-                    return userProfile.position || '代表取締役';
-                  }
-                  const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-                  return userProfile.position || '一般職';
-                })()}
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={() => {
-              auth.logout();
-              window.location.reload();
-            }}
-            className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-white/30 hover:bg-white/50 rounded-lg border border-white/40 transition-all duration-200 backdrop-blur-sm hover:shadow-lg"
-          >
-            <LogOut className="w-4 h-4 text-slate-700" />
-            <span className="text-slate-700 text-sm">ログアウト</span>
-          </button>
-        </div>
+      {/* ログアウトボタン */}
+      <div className="p-4 lg:p-6 flex-shrink-0 relative z-10">
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center space-x-3 px-4 py-3 bg-gradient-to-r from-red-600 to-red-800 hover:from-red-700 hover:to-red-900 text-white rounded-lg font-medium transition-all duration-200 shadow-lg hover:shadow-xl"
+        >
+          <LogOut className="w-5 h-5" />
+          <span>ログアウト</span>
+        </button>
       </div>
     </div>
-    </div>
+  </div>
   );
 }
 

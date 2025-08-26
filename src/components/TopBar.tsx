@@ -1,5 +1,6 @@
 import React from 'react';
 import { Bell, HelpCircle, MessageCircle, User, Menu } from 'lucide-react';
+import { useUserData } from '../hooks/useUserData';
 
 interface TopBarProps {
   onMenuClick: () => void;
@@ -7,13 +8,30 @@ interface TopBarProps {
 }
 
 function TopBar({ onMenuClick, onNavigate }: TopBarProps) {
-  // ユーザーのプラン情報を取得（実際の実装では、ユーザー情報から取得）
+  const { userData, loading } = useUserData();
+
+  // ユーザーのプラン情報を取得
   const getCurrentPlan = () => {
-    const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    return userProfile.currentPlan || 'Pro'; // デフォルトはPro
+    if (!userData.profile) return 'Free';
+    
+    // 役割に基づいてプランを決定
+    switch (userData.profile.role) {
+      case 'admin':
+        return 'Enterprise';
+      case 'manager':
+        return 'Pro';
+      default:
+        return 'Standard';
+    }
+  };
+
+  // 未読通知数を取得
+  const getUnreadNotificationCount = () => {
+    return userData.notifications.filter(notification => !notification.is_read).length;
   };
 
   const currentPlan = getCurrentPlan();
+  const unreadCount = getUnreadNotificationCount();
 
   return (
     <div className="h-16 backdrop-blur-xl bg-white/10 border-b border-white/20 flex items-center justify-between px-4 lg:px-6 shadow-xl relative overflow-hidden">
@@ -35,13 +53,19 @@ function TopBar({ onMenuClick, onNavigate }: TopBarProps) {
           <div className="relative group">
             <button 
               onClick={() => onNavigate && onNavigate('notification-history')}
-              className="p-2 text-slate-600 hover:text-slate-800 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm hover:shadow-lg"
+              className="p-2 text-slate-600 hover:text-slate-800 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm hover:shadow-lg relative"
             >
               <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
             </button>
             {/* ツールチップ */}
             <div className="absolute right-full mr-2 top-1/2 transform -translate-y-1/2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-50">
               お知らせ
+              {unreadCount > 0 && ` (${unreadCount}件の未読)`}
               <div className="absolute left-full top-1/2 transform -translate-y-1/2 w-0 h-0 border-l-4 border-l-slate-800 border-t-2 border-t-transparent border-b-2 border-b-transparent"></div>
             </div>
           </div>

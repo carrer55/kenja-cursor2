@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { auth, type User, type AuthState } from '../lib/auth';
+import { supabaseAuth, type AuthUser, type AuthState } from '../lib/supabaseAuth';
 
 export function useAuth() {
-  const [authState, setAuthState] = useState<AuthState>(auth.getAuthState());
+  const [authState, setAuthState] = useState<AuthState>(supabaseAuth.getAuthState());
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = auth.subscribe((newState) => {
+    const unsubscribe = supabaseAuth.subscribe((newState) => {
       setAuthState(newState);
     });
 
@@ -16,7 +16,7 @@ export function useAuth() {
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const result = await auth.login(email, password);
+      const result = await supabaseAuth.login(email, password);
       return result;
     } finally {
       setLoading(false);
@@ -30,40 +30,57 @@ export function useAuth() {
     company: string;
     position: string;
     phone: string;
+    department: string;
   }) => {
     setLoading(true);
     try {
-      const result = await auth.register(userData);
+      const result = await supabaseAuth.register(userData);
       return result;
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
-    auth.logout();
+  const logout = async () => {
+    setLoading(true);
+    try {
+      const result = await supabaseAuth.logout();
+      return result;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateProfile = async (updates: Partial<User>) => {
-    // ローカル実装では、現在のユーザー情報を更新
-    const currentUser = auth.getCurrentUser();
-    if (currentUser) {
-      const updatedUser = { ...currentUser, ...updates };
-      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-      return { success: true, data: updatedUser };
+  const updateProfile = async (updates: Partial<AuthUser>) => {
+    setLoading(true);
+    try {
+      const result = await supabaseAuth.updateProfile(updates);
+      return result;
+    } finally {
+      setLoading(false);
     }
-    return { success: false, error: 'ユーザーが見つかりません' };
+  };
+
+  const resetPassword = async (email: string) => {
+    setLoading(true);
+    try {
+      const result = await supabaseAuth.resetPassword(email);
+      return result;
+    } finally {
+      setLoading(false);
+    }
   };
 
   return {
     user: authState.user,
-    profile: authState.user, // ローカル実装では同じオブジェクト
+    profile: authState.user,
     loading,
     login,
     register,
     logout,
     updateProfile,
+    resetPassword,
     isAuthenticated: authState.isAuthenticated,
-    isOnboardingComplete: true // ローカル実装では常にtrue
+    isOnboardingComplete: authState.isOnboardingComplete
   };
 }

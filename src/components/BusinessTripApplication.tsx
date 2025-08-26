@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { Calendar, MapPin, Upload, Calculator, Save } from 'lucide-react';
+import { Calendar, MapPin, Upload, Calculator, Save, Loader2 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useAuth } from '../hooks/useAuth';
+import { businessTripService } from '../lib/database';
+import type { Tables } from '../types/supabase';
 
 interface BusinessTripApplicationProps {
   onNavigate: (view: 'dashboard' | 'business-trip' | 'expense') => void;
 }
 
 function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
+  const { user } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [formData, setFormData] = useState({
     purpose: '',
@@ -24,6 +28,8 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
   });
 
   const [dragActive, setDragActive] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string>('');
 
   // 出張日当の自動計算（1日あたり5,000円と仮定）
   const calculateDailyAllowance = () => {
@@ -97,12 +103,49 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // ここで申請データを送信
-    console.log('出張申請データ:', formData);
-    alert('出張申請が送信されました！');
-    onNavigate('dashboard');
+    if (!user) {
+      setSubmitError('ユーザー情報が取得できません');
+      return;
+    }
+
+    if (!formData.purpose || !formData.startDate || !formData.endDate || !formData.destination) {
+      setSubmitError('必須項目を入力してください');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError('');
+
+    try {
+      const businessTripData: Tables<'business_trip_applications'> = {
+        user_id: user.id,
+        title: `出張申請 - ${formData.destination}`,
+        description: formData.purpose,
+        destination: formData.destination,
+        start_date: formData.startDate,
+        end_date: formData.endDate,
+        purpose: formData.purpose,
+        estimated_cost: formData.estimatedExpenses.total,
+        status: 'pending',
+        submitted_at: new Date().toISOString(),
+        approved_at: null,
+        approved_by: null
+      };
+
+      const result = await businessTripService.createBusinessTripApplication(businessTripData);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      alert('出張申請が正常に送信されました！');
+      onNavigate('dashboard');
+    } catch (error: any) {
+      setSubmitError(error.message || '出張申請の送信に失敗しました');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const onBack = () => {
@@ -293,21 +336,34 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
                   )}
                 </div>
 
+                {/* エラーメッセージ */}
+                {submitError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-700">{submitError}</p>
+                  </div>
+                )}
+
                 {/* 送信ボタン */}
                 <div className="flex justify-end space-x-4">
                   <button
                     type="button"
                     onClick={onBack}
-                    className="px-6 py-3 bg-white/50 hover:bg-white/70 text-slate-700 rounded-lg font-medium transition-colors backdrop-blur-sm"
+                    disabled={isSubmitting}
+                    className="px-6 py-3 bg-white/50 hover:bg-white/70 text-slate-700 rounded-lg font-medium transition-colors backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     キャンセル
                   </button>
                   <button
                     type="submit"
-                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105"
+                    disabled={isSubmitting}
+                    className="flex items-center space-x-2 px-6 py-3 bg-gradient-to-r from-navy-700 to-navy-900 hover:from-navy-800 hover:to-navy-950 text-white rounded-lg font-medium shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Save className="w-5 h-5" />
-                    <span>申請を送信</span>
+                    {isSubmitting ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Save className="w-5 h-5" />
+                    )}
+                    <span>{isSubmitting ? '送信中...' : '申請を送信'}</span>
                   </button>
                 </div>
               </form>
