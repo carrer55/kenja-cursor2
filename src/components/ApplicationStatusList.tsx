@@ -3,7 +3,7 @@ import { ArrowLeft, Search, Filter, Eye, Edit, Trash2, Clock, CheckCircle, XCirc
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import { supabaseAuth } from '../lib/supabaseAuth';
-import { expenseService, businessTripService } from '../lib/database';
+import { supabase } from '../lib/supabase';
 import type { Tables } from '../types/supabase';
 
 interface ApplicationStatusListProps {
@@ -17,7 +17,7 @@ interface Application {
   title: string;
   amount: number;
   submittedDate: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  status: string;
   approver: string;
   lastUpdated: string;
 }
@@ -43,25 +43,33 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
 
         // 経費申請と出張申請を並行して取得
         const [expenseResult, businessTripResult] = await Promise.all([
-          expenseService.getExpenseApplications(user.id),
-          businessTripService.getBusinessTripApplications(user.id)
+          supabase
+            .from('expense_applications')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('business_trip_applications')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
         ]);
 
         if (expenseResult.error) {
-          throw new Error(expenseResult.error);
+          throw new Error(expenseResult.error.message);
         }
 
         if (businessTripResult.error) {
-          throw new Error(businessTripResult.error);
+          throw new Error(businessTripResult.error.message);
         }
 
         // データを統合してApplication形式に変換
         const expenseApps: Application[] = (expenseResult.data || []).map(expense => ({
           id: expense.id,
           type: 'expense' as const,
-          title: expense.title,
-          amount: expense.amount,
-          submittedDate: expense.submitted_at,
+          title: expense.title || '経費申請',
+          amount: expense.total_amount || 0,
+          submittedDate: expense.created_at,
           status: expense.status,
           approver: expense.approved_by || '',
           lastUpdated: expense.updated_at
@@ -70,9 +78,9 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
         const businessTripApps: Application[] = (businessTripResult.data || []).map(trip => ({
           id: trip.id,
           type: 'business-trip' as const,
-          title: trip.title,
-          amount: trip.estimated_cost,
-          submittedDate: trip.submitted_at,
+          title: trip.title || `${trip.destination}への出張`,
+          amount: trip.estimated_cost || 0,
+          submittedDate: trip.created_at,
           status: trip.status,
           approver: trip.approved_by || '',
           lastUpdated: trip.updated_at
@@ -100,37 +108,48 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'approved':
-        return <CheckCircle className="w-4 h-4 text-emerald-600" />;
+      case 'draft':
+        return <Clock className="w-4 h-4 text-slate-500" />;
+      case 'submitted':
       case 'pending':
         return <Clock className="w-4 h-4 text-amber-600" />;
-      case 'cancelled':
-        return <XCircle className="w-4 h-4 text-slate-500" />;
+      case 'approved':
+        return <CheckCircle className="w-4 h-4 text-emerald-600" />;
       case 'rejected':
         return <XCircle className="w-4 h-4 text-red-600" />;
+      case 'cancelled':
+        return <XCircle className="w-4 h-4 text-slate-500" />;
+      case 'completed':
+        return <CheckCircle className="w-4 h-4 text-blue-600" />;
       default:
         return <Clock className="w-4 h-4 text-slate-400" />;
     }
   };
 
   const getStatusLabel = (status: string) => {
-    const labels = {
+    const labels: { [key: string]: string } = {
+      'draft': '下書き',
+      'submitted': '提出済み',
       'pending': '承認待ち',
-      'approved': '承認',
+      'approved': '承認済み',
       'rejected': '否認',
-      'cancelled': 'キャンセル'
+      'cancelled': 'キャンセル',
+      'completed': '完了'
     };
-    return labels[status as keyof typeof labels] || status;
+    return labels[status] || status;
   };
 
   const getStatusColor = (status: string) => {
-    const colors = {
+    const colors: { [key: string]: string } = {
+      'draft': 'text-slate-700 bg-slate-100',
+      'submitted': 'text-amber-700 bg-amber-100',
       'pending': 'text-amber-700 bg-amber-100',
       'approved': 'text-emerald-700 bg-emerald-100',
       'rejected': 'text-red-700 bg-red-100',
-      'cancelled': 'text-slate-700 bg-slate-100'
+      'cancelled': 'text-slate-700 bg-slate-100',
+      'completed': 'text-blue-700 bg-blue-100'
     };
-    return colors[status as keyof typeof colors] || 'text-slate-700 bg-slate-100';
+    return colors[status] || 'text-slate-700 bg-slate-100';
   };
 
   const getTypeLabel = (type: string) => {
@@ -208,10 +227,13 @@ function ApplicationStatusList({ onNavigate, onShowDetail }: ApplicationStatusLi
                       className="px-4 py-3 bg-white/50 border border-white/40 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-navy-400 backdrop-blur-xl"
                     >
                       <option value="all">すべてのステータス</option>
+                      <option value="draft">下書き</option>
+                      <option value="submitted">提出済み</option>
                       <option value="pending">承認待ち</option>
-                      <option value="approved">承認</option>
+                      <option value="approved">承認済み</option>
                       <option value="rejected">否認</option>
                       <option value="cancelled">キャンセル</option>
+                      <option value="completed">完了</option>
                     </select>
                   </div>
                 </div>
