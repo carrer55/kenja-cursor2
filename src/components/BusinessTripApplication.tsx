@@ -3,7 +3,7 @@ import { Calendar, MapPin, Upload, Calculator, Save, Loader2, Globe } from 'luci
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import { supabaseAuth } from '../lib/supabaseAuth';
-import { businessTripService } from '../lib/database';
+
 import { supabase } from '../lib/supabase';
 import type { Tables } from '../types/supabase';
 
@@ -198,12 +198,17 @@ function BusinessTripApplication({ onNavigate }: BusinessTripApplicationProps) {
         approved_by: null
       };
 
-      const result = await businessTripService.createBusinessTripApplication(businessTripData);
-      if (result.error) {
-        throw new Error(result.error);
+      const { data, error } = await supabase
+        .from('business_trip_applications')
+        .insert(businessTripData)
+        .select()
+        .single();
+      
+      if (error) {
+        throw new Error(error.message);
       }
 
-      const applicationId = result.data?.id;
+      const applicationId = data?.id;
       if (!applicationId) {
         throw new Error('出張申請の作成に失敗しました');
       }
